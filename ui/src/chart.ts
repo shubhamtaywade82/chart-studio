@@ -130,6 +130,9 @@ export class ChartView {
     if (last && last.openTime === c.openTime) this.candles[this.candles.length - 1] = c;
     else this.candles.push(c);
 
+    // Ensure the LTP line moves with candle updates (important when trade stream is sparse).
+    this.setLastTradePrice(c.close);
+
     this.recomputeIndicators();
   }
 

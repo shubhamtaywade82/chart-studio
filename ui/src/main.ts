@@ -244,6 +244,7 @@ const main = (): void => {
       },
       (upd) => {
         chart.updateCandle(upd.candle);
+        updateHeaderPrice(upd.candle.close);
         const last = currentCandles[currentCandles.length - 1];
         if (last && last.openTime === upd.candle.openTime) currentCandles[currentCandles.length - 1] = upd.candle;
         else currentCandles.push(upd.candle);
