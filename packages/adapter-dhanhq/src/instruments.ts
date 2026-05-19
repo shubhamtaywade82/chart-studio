@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { type AxiosInstance } from 'axios';
 import type { InstrumentMeta, SymbolRef } from '@chart-studio/adapter-core';
 
 const SCRIP_MASTER_URL = 'https://images.dhan.co/api-data/api-scrip-master-detailed.csv';
@@ -130,10 +130,52 @@ const buildIndex = (rows: DhanInstrument[]): Map<string, DhanInstrument> => {
 export const loadInstruments = async (overrideUrl?: string): Promise<DhanInstrument[]> => {
   if (cache && Date.now() - cache.ts < REFRESH_MS) return cache.rows;
   const url = overrideUrl ?? SCRIP_MASTER_URL;
-  const { data } = await axios.get<string>(url, { timeout: 60_000, responseType: 'text', validateStatus: (s) => s === 200 });
-  const rows = parseScripMaster(data);
-  cache = { ts: Date.now(), rows, byKey: buildIndex(rows) };
-  return rows;
+  try {
+    const { data } = await axios.get<string>(url, { timeout: 60_000, responseType: 'text', validateStatus: (s) => s === 200 });
+    const rows = parseScripMaster(data);
+    cache = { ts: Date.now(), rows, byKey: buildIndex(rows) };
+    return rows;
+  } catch (err) {
+    console.error(`[dhanhq] failed to load instruments from ${url}`, err);
+    return cache?.rows ?? [];
+  }
+};
+
+/**
+ * Fetch instruments from DhanHQ API (v2 segment-wise).
+ * Requires an authenticated axios client.
+ */
+export const fetchInstrumentsFromApi = async (client: AxiosInstance, segments: string[]): Promise<DhanInstrument[]> => {
+  const all: DhanInstrument[] = [];
+  for (const seg of segments) {
+    try {
+      const { data } = await client.get<any[]>(`/v2/instrument/${seg}`);
+      if (!Array.isArray(data)) continue;
+      for (const item of data) {
+        all.push({
+          exchangeSegment: seg,
+          securityId: String(item.SEM_SMST_SECURITY_ID || item.securityId),
+          symbolName: item.SEM_TRADING_SYMBOL || item.symbolName,
+          displayName: item.SEM_CUSTOM_SYMBOL || item.displayName || item.SEM_TRADING_SYMBOL || item.symbolName,
+          instrumentType: item.SEM_INSTRUMENT_NAME || item.instrumentType,
+          segment: item.SEM_SEGMENT || item.segment || '',
+          exchId: item.SEM_EXM_EXCH_ID || item.exchId || seg.split('_')[0],
+          lotSize: Number(item.SEM_LOT_UNITS || item.lotSize) || 1,
+          tickSize: Number(item.SEM_TICK_SIZE || item.tickSize) || 0.05,
+          expiryDate: item.SEM_EXPIRY_DATE || item.expiryDate,
+          strikePrice: item.SEM_STRIKE_PRICE || item.strikePrice,
+          optionType: item.SEM_OPTION_TYPE || item.optionType,
+          isin: item.isin,
+        });
+      }
+    } catch (err) {
+      console.error(`[dhanhq] failed to fetch instruments for segment ${seg}`, err);
+    }
+  }
+  if (all.length > 0) {
+    cache = { ts: Date.now(), rows: all, byKey: buildIndex(all) };
+  }
+  return all;
 };
 
 export const findInstrument = (symbol: string): DhanInstrument | null => {
@@ -170,3 +212,4 @@ export const searchInstruments = (rows: DhanInstrument[], query: string, limit: 
   }
   return out;
 };
+

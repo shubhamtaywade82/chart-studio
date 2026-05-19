@@ -21,6 +21,12 @@ export class StaticTokenProvider implements TokenProvider {
   shutdown(): void { /* no-op */ }
 }
 
+export class NullTokenProvider implements TokenProvider {
+  async get(): Promise<DhanCreds> { return { clientId: '', accessToken: '' }; }
+  invalidate(): void { /* no-op */ }
+  shutdown(): void { /* no-op */ }
+}
+
 export interface AlgoScalperResponse {
   client_id?: string;
   clientId?: string;

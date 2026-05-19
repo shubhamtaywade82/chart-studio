@@ -41,8 +41,12 @@ const main = (): void => {
   const tapeRoot = document.getElementById('trade-tape')!;
   const sentimentRoot = document.getElementById('sentiment')!;
   const intervalBar = document.getElementById('interval-bar')!;
-  const symbolLabel = document.getElementById('active-symbol-label')!;
+  const hdrSymbol = document.getElementById('hdr-symbol')!;
+  const hdrVenue = document.getElementById('hdr-venue')!;
   const watchlistRoot = document.getElementById('watchlist')!;
+  const wsStatus = document.getElementById('ws-status')!;
+  const wsStatusText = document.getElementById('ws-status-text')!;
+  const mainGrid = document.getElementById('main-grid')!;
 
   const chart = new ChartView(chartContainer);
   const ob = new OrderBookPanel(obRoot, obSpread);
@@ -58,13 +62,18 @@ const main = (): void => {
   let activeState: AppState | null = parseHash();
   let currentCandles: Candle[] = [];
   const unsubs: Array<() => void> = [];
+  // Trade-tape running counters (mirror sentiment buy/sell windowed counts roughly).
+  let tapeBuys = 0;
+  let tapeSells = 0;
+  const tapeBuysEl = document.getElementById('tape-buys');
+  const tapeSellsEl = document.getElementById('tape-sells');
 
   new AlertsPanel(alertEngine, () => (activeState ? { provider: activeState.provider, symbol: activeState.symbol } : null));
 
-  // Indicator changes re-apply to the chart immediately.
+  // Indicators
   indicatorPicker.onChange((list) => chart.setIndicators(list));
 
-  // Drawing tool buttons.
+  // Drawings
   document.querySelectorAll<HTMLButtonElement>('.tool-btn[data-tool]').forEach((btn) => {
     btn.addEventListener('click', () => drawings.setTool(btn.dataset.tool as DrawingTool));
   });
@@ -75,6 +84,74 @@ const main = (): void => {
     });
   });
 
+  // WS connection state
+  client.onConnectionChange((connected) => {
+    wsStatus.classList.remove('connected', 'disconnected', 'connecting');
+    if (connected) {
+      wsStatus.classList.add('connected');
+      wsStatusText.textContent = 'Live';
+    } else {
+      wsStatus.classList.add('disconnected');
+      wsStatusText.textContent = 'Offline';
+    }
+  });
+
+  // Sidebar / watchlist toggles
+  document.getElementById('btn-toggle-sidebar')?.addEventListener('click', () => {
+    mainGrid.classList.toggle('sidebar-hidden');
+  });
+  document.getElementById('watchlist-toggle')?.addEventListener('click', () => {
+    mainGrid.classList.toggle('watchlist-hidden');
+  });
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const k = e.key.toLowerCase();
+    if (k === 'b') { e.preventDefault(); mainGrid.classList.toggle('sidebar-hidden'); }
+    else if (k === 'l') { e.preventDefault(); mainGrid.classList.toggle('watchlist-hidden'); }
+  });
+
+  // Sidebar tab switching
+  const sidebarTabs = document.querySelectorAll<HTMLButtonElement>('.sidebar-tab[data-tab]');
+  const sidebarPanes = document.querySelectorAll<HTMLElement>('.sidebar-tab-pane[data-tab-pane]');
+  sidebarTabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const target = tab.dataset.tab;
+      sidebarTabs.forEach((t) => {
+        const on = t === tab;
+        t.classList.toggle('active', on);
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      sidebarPanes.forEach((p) => {
+        const on = p.dataset.tabPane === target;
+        p.classList.toggle('is-active', on);
+        if (on) p.removeAttribute('aria-hidden'); else p.setAttribute('aria-hidden', 'true');
+      });
+    });
+  });
+
+  // Settings modal tab switching
+  const settingsNavItems = document.querySelectorAll<HTMLButtonElement>('.modal-nav-item[data-settings-tab]');
+  const settingsPanes = document.querySelectorAll<HTMLElement>('.settings-tab-pane');
+  const settingsTitle = document.getElementById('settings-tab-title');
+  const tabTitles: Record<string, string> = {
+    providers: 'Data Providers',
+    indicators: 'Indicators & Overlays',
+    system: 'System',
+  };
+  settingsNavItems.forEach((nav) => {
+    nav.addEventListener('click', () => {
+      const target = nav.dataset.settingsTab!;
+      settingsNavItems.forEach((n) => {
+        const on = n === nav;
+        n.classList.toggle('active', on);
+        n.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      settingsPanes.forEach((p) => p.classList.toggle('active', p.id === `tab-pane-${target}`));
+      if (settingsTitle) settingsTitle.textContent = tabTitles[target] ?? 'Settings';
+    });
+  });
+
+  // ── Topbar interval bar ─────────────────────────────────────────────
   const renderIntervals = (): void => {
     intervalBar.innerHTML = INTERVALS.map((i) =>
       `<button data-iv="${i}" class="${activeState?.interval === i ? 'active' : ''}">${i}</button>`
@@ -87,6 +164,16 @@ const main = (): void => {
     });
   };
 
+  const setSymbolLabels = (state: AppState | null): void => {
+    if (!state) {
+      hdrSymbol.textContent = 'No symbol';
+      hdrVenue.textContent = '—';
+      return;
+    }
+    hdrSymbol.textContent = state.symbol;
+    hdrVenue.textContent = state.provider.toUpperCase();
+  };
+
   const tearDown = (): void => {
     for (const u of unsubs) try { u(); } catch { /* noop */ }
     unsubs.length = 0;
@@ -95,7 +182,7 @@ const main = (): void => {
   const applyState = (state: AppState): void => {
     activeState = state;
     writeHash(state);
-    symbolLabel.textContent = `${state.provider} · ${state.symbol} · ${state.interval}`;
+    setSymbolLabels(state);
     watchlist.setActive(state.provider, state.symbol);
     drawings.setSymbol(state.provider, state.symbol);
     renderIntervals();
@@ -103,7 +190,12 @@ const main = (): void => {
     ob.reset({ lastUpdateId: 0, bids: [], asks: [], ts: 0 });
     tape.reset();
     sentiment.reset();
+    tapeBuys = 0; tapeSells = 0;
+    if (tapeBuysEl) tapeBuysEl.textContent = '0';
+    if (tapeSellsEl) tapeSellsEl.textContent = '0';
     currentCandles = [];
+    chart.clearLastTradePrice();
+    lastPrice = null;
     scriptManager.setCandles([]);
 
     unsubs.push(client.streamCandles(
@@ -130,7 +222,51 @@ const main = (): void => {
     unsubs.push(client.streamTrades(state.provider, state.symbol, (t) => {
       tape.push(t);
       sentiment.push(t);
+      chart.setLastTradePrice(t.price);
+      updateHeaderPrice(t.price);
+      if (t.makerSide) tapeSells += 1; else tapeBuys += 1;
+      if (tapeBuysEl) tapeBuysEl.textContent = String(tapeBuys);
+      if (tapeSellsEl) tapeSellsEl.textContent = String(tapeSells);
     }));
+    unsubs.push(client.streamBookTicker(state.provider, state.symbol, (bt) => updateHeaderTicker(bt.bestBidPrice, bt.bestAskPrice)));
+  };
+
+  // Header ticker (BID/ASK/SPREAD/price)
+  let lastPrice: number | null = null;
+  const fmt = (n: number, d = 4): string => n.toLocaleString(undefined, { maximumFractionDigits: d });
+  const updateHeaderPrice = (price: number): void => {
+    if (!Number.isFinite(price) || price <= 0) return;
+    const hdrPrice = document.getElementById('hdr-price');
+    const hdrChange = document.getElementById('hdr-change');
+    if (hdrPrice) hdrPrice.textContent = fmt(price);
+    if (hdrChange && lastPrice !== null && lastPrice > 0) {
+      const pct = ((price - lastPrice) / lastPrice) * 100;
+      hdrChange.classList.remove('bull', 'bear', 'neutral');
+      hdrChange.classList.add(pct > 0 ? 'bull' : pct < 0 ? 'bear' : 'neutral');
+      hdrChange.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%`;
+    }
+    lastPrice = price;
+  };
+  const updateHeaderTicker = (bid: number, ask: number): void => {
+    const hdrBid = document.getElementById('hdr-bid');
+    const hdrAsk = document.getElementById('hdr-ask');
+    const hdrSpread = document.getElementById('hdr-spread');
+    const hdrPrice = document.getElementById('hdr-price');
+    const hdrChange = document.getElementById('hdr-change');
+    if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0) return;
+    const mid = (bid + ask) / 2;
+    const spread = ask - bid;
+    if (hdrBid) hdrBid.textContent = fmt(bid);
+    if (hdrAsk) hdrAsk.textContent = fmt(ask);
+    if (hdrSpread) hdrSpread.textContent = `${fmt(spread)} (${((spread / mid) * 10_000).toFixed(2)} bps)`;
+    if (hdrPrice) hdrPrice.textContent = fmt(mid);
+    if (hdrChange && lastPrice !== null && lastPrice > 0) {
+      const pct = ((mid - lastPrice) / lastPrice) * 100;
+      hdrChange.classList.remove('bull', 'bear', 'neutral');
+      hdrChange.classList.add(pct > 0 ? 'bull' : pct < 0 ? 'bear' : 'neutral');
+      hdrChange.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%`;
+    }
+    lastPrice = mid;
   };
 
   new GlobalSearch(
@@ -150,7 +286,8 @@ const main = (): void => {
     }
   });
 
-  // Bootstrap: prefer hash; else wait for providers to come online and pick a sensible default.
+  // Bootstrap
+  setSymbolLabels(activeState);
   if (activeState) {
     applyState(activeState);
   } else {
@@ -165,7 +302,8 @@ const main = (): void => {
       if (defaultSymbol) {
         applyState({ provider: online.provider, symbol: defaultSymbol, interval: '1m' });
       } else {
-        symbolLabel.textContent = `Press ⌘K to search ${online.displayName}`;
+        hdrSymbol.textContent = `Press ⌘K to search ${online.displayName}`;
+        hdrVenue.textContent = online.provider.toUpperCase();
         renderIntervals();
       }
     };

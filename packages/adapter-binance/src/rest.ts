@@ -99,6 +99,7 @@ interface ExchangeSymbol {
   contractType?: string;
   baseAsset?: string;
   quoteAsset?: string;
+  deliveryDate?: number;
 }
 interface ExchangeInfo { symbols: ExchangeSymbol[] }
 
@@ -143,20 +144,29 @@ export const loadExchangeInfo = async (cfg: BinanceConfig, providerId: string): 
 
 export const toInstrumentMeta = (providerId: string, segmentLabel: string, info: ExchangeSymbol): InstrumentMeta => {
   const precision = parsePrecision(info) ?? undefined;
+  const label = info.baseAsset && info.quoteAsset
+    ? `${info.baseAsset}/${info.quoteAsset}${info.contractType ? ` ${info.contractType}` : ''}`
+    : info.symbol;
   return {
     provider: providerId,
     symbol: info.symbol,
-    label: info.baseAsset && info.quoteAsset ? `${info.baseAsset}/${info.quoteAsset}` : info.symbol,
+    label,
     segment: segmentLabel,
     precision,
     contractType: info.contractType,
+    expiry: info.deliveryDate && info.deliveryDate > 0 ? info.deliveryDate : undefined,
     intervals: ['1m', '5m', '15m', '1h', '4h', '1d'],
   };
 };
 
-export const toSymbolRef = (providerId: string, segmentLabel: string, info: ExchangeSymbol): SymbolRef => ({
-  provider: providerId,
-  symbol: info.symbol,
-  label: info.baseAsset && info.quoteAsset ? `${info.baseAsset}/${info.quoteAsset}` : info.symbol,
-  segment: segmentLabel,
-});
+export const toSymbolRef = (providerId: string, segmentLabel: string, info: ExchangeSymbol): SymbolRef => {
+  const label = info.baseAsset && info.quoteAsset
+    ? `${info.baseAsset}/${info.quoteAsset}${info.contractType ? ` ${info.contractType}` : ''}`
+    : info.symbol;
+  return {
+    provider: providerId,
+    symbol: info.symbol,
+    label,
+    segment: segmentLabel,
+  };
+};

@@ -4,63 +4,260 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Chart Studio</title>
+    <meta name="description" content="Multi-provider charting workstation (Binance, DhanHQ) with live order book, trades, sentiment, scripts, and alerts." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div class="brand">Chart Studio</div>
-      <button id="search-btn" class="search-trigger" type="button">
-        <span class="kbd">⌘ K</span>
-        <span id="active-symbol-label">No symbol</span>
-      </button>
-      <div class="intervals" id="interval-bar"></div>
-      <div class="topbar-actions">
-        <button id="indicators-btn" class="ghost">Indicators</button>
-        <button id="scripts-btn" class="ghost">Scripts</button>
-        <button id="alerts-add-btn" class="ghost">+ Alert</button>
+    <!-- ── Topbar ──────────────────────────────────────────────────────── -->
+    <header id="topbar">
+      <div class="topbar-left">
+        <div class="logo">
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+            <polygon points="14,2 26,8 26,20 14,26 2,20 2,8" fill="none" stroke="#7c4dff" stroke-width="1.5"/>
+            <polygon points="14,6 22,10 22,18 14,22 6,18 6,10" fill="#7c4dff" opacity="0.2"/>
+            <circle cx="14" cy="14" r="3" fill="#7c4dff"/>
+          </svg>
+          <span class="logo-text">Chart Studio</span>
+        </div>
+        <button id="search-btn" type="button" class="pair-badge" title="Search symbols (⌘K)">
+          <span id="hdr-symbol">No symbol</span>
+          <span id="hdr-venue" class="badge-tag">—</span>
+          <span class="kbd">⌘K</span>
+        </button>
+        <div id="watchlist-bar" class="watchlist-bar" role="toolbar" aria-label="Watchlist"></div>
       </div>
-      <div class="providers" id="providers-bar"></div>
-      <button id="settings-btn" class="ghost">Providers</button>
+
+      <div class="topbar-center">
+        <div class="price-cluster">
+          <span id="hdr-price" class="hdr-price">—</span>
+          <span id="hdr-change" class="hdr-change neutral">—</span>
+        </div>
+        <div class="stats-row">
+          <div class="stat-item"><span class="stat-label">BID</span><span id="hdr-bid" class="stat-value bull">—</span></div>
+          <div class="stat-item"><span class="stat-label">ASK</span><span id="hdr-ask" class="stat-value bear">—</span></div>
+          <div class="stat-item"><span class="stat-label">SPREAD</span><span id="hdr-spread" class="stat-value">—</span></div>
+        </div>
+      </div>
+
+      <div class="topbar-right">
+        <div id="interval-bar" class="tf-tabs"></div>
+        <button id="watchlist-toggle" class="icon-btn" title="Toggle Watchlist (Ctrl+L)" aria-label="Toggle watchlist">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15 8 22 9 17 14 18 21 12 18 6 21 7 14 2 9 9 8 12 2"/></svg>
+        </button>
+        <button id="btn-toggle-sidebar" class="icon-btn" title="Toggle Sidebar (Ctrl+B)" aria-label="Toggle sidebar">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+        </button>
+        <div id="providers-bar" class="providers"></div>
+        <button id="settings-btn" class="icon-btn" title="Settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9 1.65 1.65 0 0 0 4.27 7.18l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6 1.65 1.65 0 0 0 10 3.09V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <div id="ws-status" class="ws-status connecting" title="Gateway connection">
+          <span class="ws-dot"></span>
+          <span id="ws-status-text">Connecting…</span>
+        </div>
+      </div>
     </header>
 
-    <main class="layout">
-      <aside class="left-rail">
-        <div class="rail-section">
-          <header><h3>Watchlist</h3><button id="watchlist-add" class="ghost">+</button></header>
+    <!-- ── Main Grid ───────────────────────────────────────────────────── -->
+    <main id="main-grid">
+      <!-- Optional left watchlist rail (collapsible) -->
+      <aside id="col-watchlist" class="watchlist-rail" aria-label="Watchlist">
+        <div class="panel watchlist-panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Watchlist</h2>
+            <button id="watchlist-add" class="icon-btn icon-btn-sm" title="Add symbol (⌘K)" aria-label="Add">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+          </div>
           <div id="watchlist" class="watchlist"></div>
         </div>
       </aside>
 
-      <section class="chart-area">
-        <div class="drawing-toolbar">
-          <button data-tool="cursor" class="tool-btn active" title="Cursor">↖</button>
-          <button data-tool="hline" class="tool-btn" title="Horizontal line">―</button>
-          <button data-tool="trendline" class="tool-btn" title="Trend line">╱</button>
-          <button id="drawings-clear" class="tool-btn" title="Clear drawings">⌫</button>
+      <!-- Chart column -->
+      <section id="col-chart">
+        <div class="panel" id="chart-panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Price Chart</h2>
+            <div class="panel-controls">
+              <div class="drawing-toolbar">
+                <button data-tool="cursor" class="tool-btn active" title="Cursor">↖</button>
+                <button data-tool="hline" class="tool-btn" title="Horizontal line">―</button>
+                <button data-tool="trendline" class="tool-btn" title="Trend line">╱</button>
+                <button id="drawings-clear" class="tool-btn" title="Clear drawings">⌫</button>
+              </div>
+              <button id="indicators-btn" type="button" class="chart-settings-btn" title="Indicators (Ctrl+I)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                <span>Indicators</span>
+              </button>
+              <button id="scripts-btn" type="button" class="chart-settings-btn" title="NanoPine scripts">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                <span>Scripts</span>
+              </button>
+              <button id="alerts-add-btn" type="button" class="chart-settings-btn" title="Add alert">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                <span>+ Alert</span>
+              </button>
+            </div>
+          </div>
+          <div class="chart-surface" id="chart-surface">
+            <div id="chart-signal-hud" class="chart-signal-hud" hidden aria-live="polite"></div>
+            <div id="chart-container"></div>
+          </div>
         </div>
-        <div id="chart-container"></div>
       </section>
 
-      <aside class="side-panels">
-        <div class="panel">
-          <header><h3>Order Book</h3><span id="ob-spread"></span></header>
-          <div id="orderbook" class="orderbook"></div>
-        </div>
-        <div class="panel">
-          <header><h3>Trades</h3></header>
-          <div id="trade-tape" class="trade-tape"></div>
-        </div>
-        <div class="panel">
-          <header><h3>Sentiment</h3></header>
-          <div id="sentiment" class="sentiment"></div>
-        </div>
-        <div class="panel">
-          <header><h3>Alerts</h3></header>
-          <div id="alerts-panel" class="alerts-panel"></div>
+      <!-- Tabbed sidebar -->
+      <aside id="col-sidebar" class="sidebar-tabs" aria-label="Market tools">
+        <nav class="sidebar-tab-bar" role="tablist" aria-label="Sidebar views">
+          <button type="button" class="sidebar-tab active" role="tab" aria-selected="true" data-tab="live">Live</button>
+          <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="tape">Tape</button>
+          <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="insights">Insights</button>
+          <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="alerts">Alerts</button>
+          <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="scripts">Scripts</button>
+        </nav>
+        <div class="sidebar-tab-panels">
+          <!-- Live: Sentiment + Microstructure + Order Book -->
+          <div class="sidebar-tab-pane is-active" role="tabpanel" data-tab-pane="live">
+            <div class="sidebar-live-stack">
+              <div class="panel sidebar-inner-panel" id="sentiment-panel">
+                <div class="panel-header">
+                  <h2 class="panel-title">Order-Flow Sentiment</h2>
+                  <span id="sentiment-label" class="sentiment-txt neutral">Neutral</span>
+                </div>
+                <div id="sentiment" class="sentiment"></div>
+              </div>
+
+              <div class="panel sidebar-inner-panel ms-panel" id="microstructure-panel">
+                <div class="panel-header">
+                  <h2 class="panel-title">Microstructure</h2>
+                  <span id="ms-verdict-badge" class="ms-obi-badge neutral">NEUTRAL</span>
+                </div>
+                <div class="ms-body">
+                  <div class="ms-row"><div class="ms-row-label">TFI 30s</div><div class="ms-row-content" id="ms-tfi-30">
+                    <div class="ms-tfi-bar-wrap"><div class="ms-tfi-bar-fill buy" style="width:50%"></div></div>
+                    <div class="ms-tfi-labels"><span class="ms-tfi-buy mono-sm">—</span><span class="ms-tfi-net mono-sm">—</span><span class="ms-tfi-sell mono-sm">—</span></div>
+                  </div></div>
+                  <div class="ms-row"><div class="ms-row-label">Wt. OBI</div><div class="ms-row-content" id="ms-obi"><div class="ms-obi-bar-wrap"><div class="ms-obi-center-tick"></div></div><div class="ms-obi-value mono-sm">—</div></div></div>
+                  <div class="ms-row"><div class="ms-row-label">Pressure</div><div class="ms-row-content" id="ms-pressure"><div class="ms-pressure-bar-wrap"></div><div class="ms-pressure-label mono-sm">—</div></div></div>
+                  <div class="ms-row"><div class="ms-row-label">Spread</div><div class="ms-row-content ms-spread-row" id="ms-spread"><span class="ms-spread-val">—</span><span class="ms-spread-badge neutral">—</span></div></div>
+                  <div class="ms-row"><div class="ms-row-label">RV</div><div class="ms-row-content ms-rv-row" id="ms-rv"><span class="ms-rv-val">—</span><span class="ms-rv-badge rv-low">—</span></div></div>
+                  <div class="ms-row"><div class="ms-row-label">μPrice</div><div class="ms-row-content" id="ms-microprice"><span class="ms-stat-val mono-sm">—</span></div></div>
+                </div>
+                <div class="ms-stub-hint">Awaiting microstructure signals from gateway.</div>
+              </div>
+
+              <div class="panel sidebar-inner-panel" id="book-panel">
+                <div class="panel-header">
+                  <h2 class="panel-title">Order Book</h2>
+                  <span id="book-imbalance" class="imbalance-badge neutral">—</span>
+                </div>
+                <div class="book-mark-block">
+                  <div id="book-mark-val" class="book-mark-val is-empty">—</div>
+                  <div class="book-mark-sub">
+                    <span>Mid price</span>
+                    <span id="ob-spread" class="book-spread-inline"></span>
+                  </div>
+                </div>
+                <div id="orderbook" class="orderbook"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tape -->
+          <div class="sidebar-tab-pane" role="tabpanel" data-tab-pane="tape" aria-hidden="true">
+            <div class="sidebar-tape-stack">
+              <div class="panel sidebar-inner-panel" id="trades-panel">
+                <div class="panel-header">
+                  <h2 class="panel-title">Trade Tape</h2>
+                  <div class="tape-stats">
+                    <span class="stat-label">BUYS</span><span id="tape-buys" class="stat-value bull">0</span>
+                    <span class="stat-label">SELLS</span><span id="tape-sells" class="stat-value bear">0</span>
+                  </div>
+                </div>
+                <div id="trade-tape" class="trade-tape"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Insights -->
+          <div class="sidebar-tab-pane" role="tabpanel" data-tab-pane="insights" aria-hidden="true">
+            <div class="sidebar-insights-stack">
+              <div class="panel sidebar-inner-panel" id="signals-panel">
+                <div class="panel-header">
+                  <h2 class="panel-title">Strategy Signals</h2>
+                  <span id="signal-verdict" class="verdict-badge neutral">NEUTRAL</span>
+                </div>
+                <div id="signals-content">
+                  <div class="sig-row"><div class="sig-label">HTF Bias</div><div id="sig-htf" class="sig-value neutral">—</div></div>
+                  <div class="sig-row"><div class="sig-label">Trend</div><div id="sig-ltf" class="sig-value neutral">—</div></div>
+                  <div class="sig-row"><div class="sig-label">Confidence</div><div id="sig-conf" class="sig-value">—</div></div>
+                  <div class="sig-row"><div class="sig-label">Ref price (chart TF)</div><div id="sig-ref-tf" class="sig-value dim mono-sm">—</div></div>
+                  <div class="sig-section-header">Smart Money Concepts</div>
+                  <div class="sig-row"><div class="sig-label">SMC Score</div><div id="sig-smc-score" class="sig-value">—</div></div>
+                  <div class="sig-row"><div class="sig-label">Liquidity Sweep</div><div id="sig-sweep" class="sig-value">—</div></div>
+                  <div class="sig-row"><div class="sig-label">Order Block</div><div id="sig-ob" class="sig-value">—</div></div>
+                  <div class="sig-row"><div class="sig-label">FVG</div><div id="sig-fvg" class="sig-value">—</div></div>
+                  <div class="sig-row"><div class="sig-label">BOS</div><div id="sig-bos" class="sig-value">—</div></div>
+                  <div class="sig-row"><div class="sig-label">CHoCH</div><div id="sig-choch" class="sig-value">—</div></div>
+                  <div class="sig-section-header">MTF Stack</div>
+                  <div class="sig-row"><div class="sig-label">Direction</div><div id="sig-mtf-dir" class="sig-value">—</div></div>
+                  <div class="sig-row"><div class="sig-label">Pass</div><div id="sig-mtf-pass" class="sig-value">—</div></div>
+                  <div id="sig-mtf-reasons" class="reasons-list"></div>
+                  <div class="sig-section-header">Trend Matrix</div>
+                  <div class="signals-matrix">
+                    <div class="matrix-item"><span class="mat-label">EMA</span><span class="mat-val">—</span></div>
+                    <div class="matrix-item"><span class="mat-label">MACD</span><span class="mat-val">—</span></div>
+                    <div class="matrix-item"><span class="mat-label">RSI</span><span class="mat-val">—</span></div>
+                    <div class="matrix-item"><span class="mat-label">ST</span><span class="mat-val">—</span></div>
+                    <div class="matrix-item"><span class="mat-label">STRUCT</span><span class="mat-val">—</span></div>
+                    <div class="matrix-item"><span class="mat-label">VOL</span><span class="mat-val">—</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="panel sidebar-inner-panel" id="ai-brief-panel">
+                <div class="panel-header">
+                  <h2 class="panel-title">AI Brief</h2>
+                  <span id="ai-brief-status" class="mono-sm dim">offline</span>
+                </div>
+                <div id="ai-brief-body" class="ai-brief-body ai-brief-prose">
+                  <p class="ai-brief-setup">AI brief not wired in chart-studio yet. Hook an LLM endpoint to populate this panel.</p>
+                  <p class="ai-brief-muted"><em>Advisory only — not financial advice.</em></p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Alerts -->
+          <div class="sidebar-tab-pane" role="tabpanel" data-tab-pane="alerts" aria-hidden="true">
+            <div class="panel sidebar-inner-panel">
+              <div class="panel-header">
+                <h2 class="panel-title">Alerts</h2>
+                <span id="alerts-count" class="mono-sm dim">0</span>
+              </div>
+              <div id="alerts-panel" class="alerts-panel"></div>
+            </div>
+          </div>
+
+          <!-- Scripts -->
+          <div class="sidebar-tab-pane" role="tabpanel" data-tab-pane="scripts" aria-hidden="true">
+            <div class="sidebar-scripts-stack">
+              <div class="panel sidebar-inner-panel" id="scripts-panel">
+                <div class="panel-header">
+                  <h2 class="panel-title">Scripts</h2>
+                  <span class="mono-sm dim">NanoPine v1</span>
+                </div>
+                <div id="nanopine-host" class="nanopine-host"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </aside>
     </main>
 
+    <!-- ── Global Search Overlay ───────────────────────────────────────── -->
     <div id="search-overlay" class="overlay hidden">
       <div class="search-modal">
         <input id="search-input" type="text" placeholder="Search across providers (e.g. BTC, RELIANCE, NIFTY)…" autocomplete="off" />
@@ -69,14 +266,67 @@
       </div>
     </div>
 
-    <div id="settings-overlay" class="overlay hidden">
-      <div class="settings-modal">
-        <h2>Data Providers</h2>
-        <p class="hint">Live provider status. Configure adapters via environment variables.</p>
-        <ul id="provider-list" class="provider-list"></ul>
-        <button class="ghost" id="close-settings">Close</button>
+    <!-- ── Settings Modal (Providers / Indicators / System) ────────────── -->
+    <div id="settings-overlay" class="modal-backdrop" hidden aria-modal="true" role="dialog" aria-labelledby="settings-title">
+      <div class="modal-dialog panel settings-modal-lg">
+        <div class="modal-sidebar">
+          <div class="modal-sidebar-header">
+            <h2 id="settings-title" class="modal-title-sm">Settings</h2>
+          </div>
+          <nav class="modal-nav" role="tablist">
+            <button type="button" class="modal-nav-item active" role="tab" data-settings-tab="providers" aria-selected="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+              <span>Providers</span>
+            </button>
+            <button type="button" class="modal-nav-item" role="tab" data-settings-tab="indicators" aria-selected="false">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              <span>Indicators</span>
+            </button>
+            <button type="button" class="modal-nav-item" role="tab" data-settings-tab="system" aria-selected="false">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
+              <span>System</span>
+            </button>
+          </nav>
+        </div>
+        <div class="modal-content-area">
+          <div class="modal-header-simple">
+            <h3 id="settings-tab-title" class="modal-content-title">Data Providers</h3>
+            <button type="button" id="close-settings" class="modal-close-x" title="Close (Esc)">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+
+          <div id="tab-pane-providers" class="settings-tab-pane active">
+            <div class="settings-group">
+              <h4 class="settings-group-title">Live Adapters</h4>
+              <p class="hint">Configure providers via environment variables. Status updates every few seconds.</p>
+              <ul id="provider-list" class="provider-list"></ul>
+            </div>
+          </div>
+
+          <div id="tab-pane-indicators" class="settings-tab-pane">
+            <div class="settings-group">
+              <h4 class="settings-group-title">Chart Overlays</h4>
+              <div id="indicator-picker-host" class="settings-items-list"></div>
+              <p class="hint" style="margin-top:12px">Use the Indicators dialog (toolbar) to add full presets with custom parameters.</p>
+            </div>
+          </div>
+
+          <div id="tab-pane-system" class="settings-tab-pane">
+            <div class="settings-group">
+              <h4 class="settings-group-title">Engine Info</h4>
+              <div class="settings-items-list">
+                <div class="setting-info-row"><span class="info-label">Version</span><span class="info-val">chart-studio · alpha</span></div>
+                <div class="setting-info-row"><span class="info-label">Gateway</span><span id="sys-gateway" class="info-val">—</span></div>
+                <div class="setting-info-row"><span class="info-label">Providers Online</span><span id="sys-providers-count" class="info-val">0</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
+
+    <div class="toast-root" id="toast-root"></div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

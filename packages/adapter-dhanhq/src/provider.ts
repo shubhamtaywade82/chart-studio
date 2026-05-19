@@ -13,6 +13,7 @@ import type {
 import {
   findInstrument,
   loadInstruments,
+  fetchInstrumentsFromApi,
   searchInstruments,
   toInstrumentMeta,
   toSymbolRef,
@@ -47,7 +48,16 @@ export class DhanProvider implements MarketDataProvider {
   }
 
   async init(): Promise<void> {
-    this.instrumentCache = await loadInstruments(this.cfg.scripMasterUrl).catch(() => []);
+    const segments = ['NSE_EQ', 'NSE_FNO', 'NSE_CURRENCY', 'BSE_EQ', 'BSE_FNO', 'MCX_COMM'];
+    try {
+      this.instrumentCache = await fetchInstrumentsFromApi(this.client, segments);
+    } catch (err) {
+      console.warn('[dhanhq] failed to fetch instruments from API, falling back to CSV', err);
+    }
+
+    if (this.instrumentCache.length === 0) {
+      this.instrumentCache = await loadInstruments(this.cfg.scripMasterUrl).catch(() => []);
+    }
   }
 
   async shutdown(): Promise<void> {

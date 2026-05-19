@@ -3,6 +3,7 @@ import {
   CrosshairMode,
   LineStyle,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type LineWidth,
   type SeriesMarker,
@@ -36,6 +37,7 @@ export class ChartView {
   private resizeObs: ResizeObserver;
   private rsiActive = false;
   private macdActive = false;
+  private ltpLine: IPriceLine | null = null;
 
   constructor(container: HTMLElement) {
     this.chart = createChart(container, {
@@ -199,6 +201,52 @@ export class ChartView {
           (ms.series as ISeriesApi<'Line'>).setData(data as { time: UTCTimestamp; value: number }[]);
         }
       }
+    }
+  }
+
+  // ── Live trade tick: expand forming bar + LTP price line ────────────
+
+  /**
+   * Apply a trade tick to the in-flight bar so the candle body moves
+   * between kline updates (like binance UI's LTP-driven candle). Also
+   * maintains a dashed price line at the last trade price.
+   */
+  setLastTradePrice(price: number): void {
+    if (!Number.isFinite(price) || price <= 0) return;
+    const last = this.candles[this.candles.length - 1];
+    if (last) {
+      const next: Candle = {
+        ...last,
+        high: Math.max(last.high, price),
+        low: Math.min(last.low, price),
+        close: price,
+      };
+      this.candles[this.candles.length - 1] = next;
+      const t = (next.openTime / 1000) as UTCTimestamp;
+      this.series.update({ time: t, open: next.open, high: next.high, low: next.low, close: next.close });
+    }
+    const bullish = !last || price >= last.open;
+    const color = bullish ? '#00e676' : '#ff1744';
+    if (!this.ltpLine) {
+      this.ltpLine = this.series.createPriceLine({
+        price,
+        color,
+        lineWidth: 1 as LineWidth,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        axisLabelColor: color,
+        axisLabelTextColor: '#000000',
+        title: '',
+      });
+    } else {
+      this.ltpLine.applyOptions({ price, color, axisLabelColor: color });
+    }
+  }
+
+  clearLastTradePrice(): void {
+    if (this.ltpLine) {
+      try { this.series.removePriceLine(this.ltpLine); } catch { /* noop */ }
+      this.ltpLine = null;
     }
   }
 

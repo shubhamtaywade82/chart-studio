@@ -51,10 +51,12 @@ export class RedisBridge {
   }
 
   async start(): Promise<void> {
+    this.sub.on('message', (channel, message) => {
+      if (channel.startsWith('chart.discover.') && channel.includes('.rep.')) this.routeDiscoverReply(message);
+    });
     this.sub.on('pmessage', (_pattern, channel, message) => {
       if (channel.startsWith('chart.data.')) this.routeDataMessage(channel, message);
       else if (channel.startsWith('chart.presence.')) this.routePresenceMessage(message);
-      else if (channel.startsWith('chart.discover.') && channel.includes('.rep.')) this.routeDiscoverReply(message);
     });
     await this.sub.psubscribe('chart.data.*', presencePattern());
   }
