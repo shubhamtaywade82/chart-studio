@@ -3,6 +3,7 @@ import type { SerializedScriptOutput } from '@chart-studio/indicator-runtime';
 import { loadScripts, saveScripts, ScriptRunner, type SavedScript } from './runner';
 import type { ChartView } from '../chart';
 import type { SeriesMarker, UTCTimestamp, ISeriesApi, LineWidth } from 'lightweight-charts';
+import { HistogramSeries, LineSeries } from 'lightweight-charts';
 
 interface Mounted {
   scriptId: string;
@@ -81,7 +82,7 @@ export class ScriptManager {
       if (out.kind === 'line' || out.kind === 'area' || out.kind === 'histogram') {
         const color = (out.opts['color'] as string) ?? '#58a6ff';
         if (out.kind === 'histogram') {
-          const s = chartApi.addHistogramSeries({ color });
+          const s = chartApi.addSeries(HistogramSeries, { color });
           s.setData(out.data.filter((p) => p.time !== null && Number.isFinite(p.value)).map((p) => ({
             time: ((p.time as number) / 1000) as UTCTimestamp,
             value: p.value,
@@ -89,7 +90,7 @@ export class ScriptManager {
           })));
           mounted.histogramSeries.push(s);
         } else {
-          const s = chartApi.addLineSeries({ color, lineWidth: 1 as LineWidth, priceLineVisible: false, lastValueVisible: false });
+          const s = chartApi.addSeries(LineSeries, { color, lineWidth: 1 as LineWidth, priceLineVisible: false, lastValueVisible: false });
           s.setData(out.data.filter((p) => p.time !== null && Number.isFinite(p.value)).map((p) => ({
             time: ((p.time as number) / 1000) as UTCTimestamp,
             value: p.value,

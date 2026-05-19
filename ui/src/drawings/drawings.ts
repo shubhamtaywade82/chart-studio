@@ -1,5 +1,5 @@
 import type { IPriceLine, ISeriesApi, UTCTimestamp, LineWidth } from 'lightweight-charts';
-import { LineStyle } from 'lightweight-charts';
+import { LineSeries, LineStyle } from 'lightweight-charts';
 import type { ChartView } from '../chart';
 
 const STORAGE_KEY = 'chart-studio:drawings:v1';
@@ -113,7 +113,7 @@ export class DrawingLayer {
       });
       this.hlineHandles.set(d.id, handle);
     } else if (d.kind === 'trendline') {
-      const s = this.chart.api().addLineSeries({ color: d.color, lineWidth: 2 as LineWidth, lastValueVisible: false, priceLineVisible: false });
+      const s = this.chart.api().addSeries(LineSeries, { color: d.color, lineWidth: 2 as LineWidth, lastValueVisible: false, priceLineVisible: false });
       const p1 = { time: d.t1, value: d.p1 };
       const p2 = { time: d.t2, value: d.p2 };
       const ordered = (p1.time as number) <= (p2.time as number) ? [p1, p2] : [p2, p1];

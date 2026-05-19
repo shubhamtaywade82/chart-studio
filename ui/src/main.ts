@@ -84,6 +84,42 @@ const main = (): void => {
     });
   });
 
+  // Candle theme picker
+  const themeSelect = document.getElementById('candle-theme-select') as HTMLSelectElement | null;
+  if (themeSelect) {
+    const current = chart.currentTheme();
+    themeSelect.innerHTML = chart.themes()
+      .map((t) => `<option value="${t.id}" ${t.id === current.id ? 'selected' : ''}>${t.label}</option>`)
+      .join('');
+    themeSelect.addEventListener('change', () => chart.setTheme(themeSelect.value));
+  }
+
+  // Crosshair tooltip
+  const tooltipEl = document.getElementById('chart-tooltip');
+  chart.onCrosshair((info) => {
+    if (!tooltipEl) return;
+    if (!info) { tooltipEl.setAttribute('hidden', ''); return; }
+    const dir = info.close >= info.open ? 'bull' : 'bear';
+    const f = (n: number, d = 4): string => n.toLocaleString(undefined, { maximumFractionDigits: d });
+    const vol = info.volume !== null ? `<span class="tt-k">V</span><span class="tt-v">${f(info.volume, 0)}</span>` : '';
+    tooltipEl.innerHTML = `
+      <span class="tt-k">O</span><span class="tt-v">${f(info.open)}</span>
+      <span class="tt-k">H</span><span class="tt-v">${f(info.high)}</span>
+      <span class="tt-k">L</span><span class="tt-v">${f(info.low)}</span>
+      <span class="tt-k">C</span><span class="tt-v ${dir}">${f(info.close)}</span>
+      ${vol}`;
+    tooltipEl.removeAttribute('hidden');
+  });
+
+  // Scroll-to-live FAB
+  const scrollLiveBtn = document.getElementById('chart-scroll-live');
+  scrollLiveBtn?.addEventListener('click', () => chart.scrollToRealtime());
+  chart.onLiveStateChange((atLive) => {
+    if (!scrollLiveBtn) return;
+    if (atLive) scrollLiveBtn.setAttribute('hidden', '');
+    else scrollLiveBtn.removeAttribute('hidden');
+  });
+
   // WS connection state
   client.onConnectionChange((connected) => {
     wsStatus.classList.remove('connected', 'disconnected', 'connecting');
