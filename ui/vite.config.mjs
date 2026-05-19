@@ -12,6 +12,13 @@ export default defineConfig({
   },
   server: {
     port: 5174,
+    host: true, // Listen on all addresses, important for Docker/Remote access
+    watch: {
+      usePolling: true, // Ensures changes are picked up in WSL/Docker
+    },
+    hmr: {
+      overlay: true, // Show errors in the UI
+    },
     proxy: {
       '/api': {
         target: process.env.VITE_GATEWAY_URL ?? 'http://127.0.0.1:4100',

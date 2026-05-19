@@ -17,7 +17,11 @@
     "dev:binance": "npm run -w @chart-studio/adapter-binance dev",
     "dev:dhanhq": "npm run -w @chart-studio/adapter-dhanhq dev",
     "dev:ui": "npm run -w @chart-studio/ui dev",
+    "dev": "concurrently \"npm run dev:gateway\" \"npm run dev:binance\" \"npm run dev:dhanhq\" \"npm run dev:ui\"",
     "typecheck": "tsc -b packages/adapter-core packages/gateway packages/adapter-binance packages/adapter-dhanhq"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
   },
   "engines": {
     "node": ">=20"

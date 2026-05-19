@@ -7,18 +7,16 @@ export interface CandleTheme {
 }
 
 /**
- * Candle themes loosely modeled after binance UI's candle-themes.js. v5
- * supports `borderVisible`/`wickVisible` so we can render "hollow" or
- * "filled" bodies.
+ * Candle themes optimized for lightweight-charts.
  */
 export const CANDLE_THEMES: CandleTheme[] = [
   {
     id: 'quantum',
-    label: 'Quantum',
+    label: 'Quantum (Binance)',
     options: {
-      upColor: '#00e676', downColor: '#ff1744',
-      borderUpColor: '#00e676', borderDownColor: '#ff1744',
-      wickUpColor: 'rgba(0, 230, 118, 0.85)', wickDownColor: 'rgba(255, 23, 68, 0.85)',
+      upColor: '#2ebd85', downColor: '#f6465d',
+      borderUpColor: '#2ebd85', borderDownColor: '#f6465d',
+      wickUpColor: 'rgba(46, 189, 133, 0.85)', wickDownColor: 'rgba(246, 70, 93, 0.85)',
       borderVisible: true, wickVisible: true,
     },
   },
@@ -26,9 +24,9 @@ export const CANDLE_THEMES: CandleTheme[] = [
     id: 'hollow',
     label: 'Hollow up · Solid down',
     options: {
-      upColor: 'rgba(0,0,0,0)', downColor: '#ff1744',
-      borderUpColor: '#00e676', borderDownColor: '#ff1744',
-      wickUpColor: '#00e676', wickDownColor: '#ff1744',
+      upColor: 'rgba(0,0,0,0)', downColor: '#f6465d',
+      borderUpColor: '#2ebd85', borderDownColor: '#f6465d',
+      wickUpColor: '#2ebd85', wickDownColor: '#f6465d',
       borderVisible: true, wickVisible: true,
     },
   },

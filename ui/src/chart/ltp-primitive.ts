@@ -19,7 +19,7 @@ export class LtpPrimitive implements ISeriesPrimitive<'Candlestick'> {
   private chart: IChartApi | null = null;
   private series: ISeriesApi<'Candlestick'> | null = null;
   private price: number | null = null;
-  private color = '#00e676';
+  private color = '#2ebd85';
   private startTime: UTCTimestamp | null = null;
   private requestUpdate: (() => void) | null = null;
 
@@ -74,14 +74,36 @@ class LtpPaneView implements ISeriesPrimitivePaneView {
         const xStart = startTime !== null ? ts.timeToCoordinate(startTime) ?? 0 : 0;
         const xEnd = scope.mediaSize.width;
         const ctx = scope.context;
+
+        console.log(`[LtpPrimitive] draw price=${price} y=${y} xStart=${xStart}`);
+
         ctx.save();
+        
+        // Draw the horizontal line
         ctx.beginPath();
-        ctx.setLineDash([4, 4]);
+        ctx.setLineDash([5, 5]);
         ctx.strokeStyle = color;
         ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.8;
         ctx.moveTo(Math.max(0, xStart), y);
         ctx.lineTo(xEnd, y);
         ctx.stroke();
+
+        // Draw a "glow" circle at the price point on the current bar
+        if (xStart > 0) {
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 0.4;
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(xStart, y, 4, 0, Math.PI * 2);
+          ctx.fill();
+          
+          ctx.globalAlpha = 1.0;
+          ctx.beginPath();
+          ctx.arc(xStart, y, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
         ctx.restore();
       },
     };
@@ -96,9 +118,13 @@ class LtpPriceAxisView implements ISeriesPrimitiveAxisView {
     return series.priceToCoordinate(price) ?? -1;
   }
   text(): string {
-    const { price } = this.p._state();
+    const { series, price } = this.p._state();
     if (price === null) return '';
-    return price.toLocaleString(undefined, { maximumFractionDigits: 6 });
+    const precision = (series?.options() as any)?.priceFormat?.precision ?? 2;
+    return price.toLocaleString(undefined, { 
+      minimumFractionDigits: precision, 
+      maximumFractionDigits: precision 
+    });
   }
   textColor(): string { return '#000000'; }
   backColor(): string { return this.p._state().color; }

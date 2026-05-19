@@ -20,9 +20,16 @@ export class IndicatorPicker {
       const def = INDICATORS.find((d) => d.id === defId);
       if (!def) return;
       const uid = `${defId}-${Date.now().toString(36)}`;
-      this.active.push({ uid, defId, params: { ...def.defaults } });
+      this.active.push({ uid, defId, params: [...def.defaults] });
       sel.value = '';
       this.persistAndRender();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
+        e.preventDefault();
+        this.open();
+      }
     });
   }
 
@@ -32,9 +39,7 @@ export class IndicatorPicker {
     return () => { this.listeners.delete(fn); };
   }
 
-  current(): ActiveIndicator[] {
-    return this.active;
-  }
+  current(): ActiveIndicator[] { return this.active; }
 
   open(): void {
     this.renderActive();
@@ -57,12 +62,12 @@ export class IndicatorPicker {
     el = document.createElement('div');
     el.id = 'indicators-overlay';
     el.className = 'overlay hidden';
-    const options = INDICATORS.map((d) => `<option value="${d.id}">${d.label}</option>`).join('');
+    const options = INDICATORS.map((d) => `<option value="${d.id}">${d.id} — ${d.label}${d.onMain ? '' : ' · pane'}</option>`).join('');
     el.innerHTML = `
-      <div class="settings-modal" style="width: 520px;">
+      <div class="settings-modal" style="width: 540px;">
         <h2>Indicators</h2>
-        <p class="hint">Toggle and configure indicators. Persisted to your browser.</p>
-        <select id="indicator-add">
+        <p class="hint">Built-in technical indicators (klinecharts). MA/EMA/BOLL/BBI/SAR overlay the price; everything else gets a sub-pane.</p>
+        <select id="indicator-add" class="ghost" style="width: 100%; padding: 8px;">
           <option value="">＋ Add indicator…</option>
           ${options}
         </select>
@@ -75,21 +80,20 @@ export class IndicatorPicker {
 
   private renderActive(): void {
     if (this.active.length === 0) {
-      this.list.innerHTML = '<li>No indicators active.</li>';
+      this.list.innerHTML = '<li><div class="name">No indicators active.</div></li>';
       return;
     }
     this.list.innerHTML = this.active.map((a) => {
       const def = INDICATORS.find((d) => d.id === a.defId);
-      const label = def?.label ?? a.defId;
-      const paramFields = Object.keys(a.params).map((k) => `
+      const label = def ? `${def.id} — ${def.label}` : a.defId;
+      const paramFields = (def?.paramLabels ?? []).map((lbl, i) => `
         <label class="param">
-          <span>${k}</span>
-          <input type="number" data-uid="${a.uid}" data-param="${k}" value="${a.params[k]}" step="any" />
-        </label>
-      `).join('');
+          <span>${lbl}</span>
+          <input type="number" data-uid="${a.uid}" data-idx="${i}" value="${a.params[i] ?? def?.defaults[i] ?? 0}" step="any" />
+        </label>`).join('');
       return `<li style="flex-direction: column; align-items: stretch;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <strong>${label}</strong>
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+          <strong class="name">${label}</strong>
           <button class="ghost" data-remove="${a.uid}">Remove</button>
         </div>
         ${paramFields ? `<div class="param-row">${paramFields}</div>` : ''}
@@ -105,11 +109,11 @@ export class IndicatorPicker {
     this.list.querySelectorAll<HTMLInputElement>('input[data-uid]').forEach((inp) => {
       inp.addEventListener('change', () => {
         const uid = inp.dataset.uid!;
-        const key = inp.dataset.param!;
+        const idx = Number(inp.dataset.idx);
         const v = Number(inp.value);
         const a = this.active.find((x) => x.uid === uid);
-        if (a) {
-          a.params = { ...a.params, [key]: Number.isFinite(v) ? v : 0 };
+        if (a && Number.isFinite(idx) && Number.isFinite(v)) {
+          a.params = a.params.map((p, i) => (i === idx ? v : p));
           this.persistAndRender();
         }
       });

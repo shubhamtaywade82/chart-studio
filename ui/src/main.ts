@@ -11,6 +11,7 @@ import { AlertEngine } from './alerts/alerts';
 import { AlertsPanel } from './alerts/panel';
 import { ScriptManager } from './scripts/editor';
 import { DrawingLayer, type DrawingTool } from './drawings/drawings';
+import { INDICATORS, type ActiveIndicator } from './indicators/registry';
 
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
@@ -70,8 +71,11 @@ const main = (): void => {
 
   new AlertsPanel(alertEngine, () => (activeState ? { provider: activeState.provider, symbol: activeState.symbol } : null));
 
-  // Indicators
-  indicatorPicker.onChange((list) => chart.setIndicators(list));
+  // Indicators - (Skipping for now while restoring lightweight-charts)
+  const applyIndicators = (list: ActiveIndicator[]): void => {
+    // TODO: Re-implement indicator overlay in lightweight-charts if needed
+  };
+  indicatorPicker.onChange(applyIndicators);
 
   // Drawings
   document.querySelectorAll<HTMLButtonElement>('.tool-btn[data-tool]').forEach((btn) => {
@@ -100,13 +104,17 @@ const main = (): void => {
     if (!tooltipEl) return;
     if (!info) { tooltipEl.setAttribute('hidden', ''); return; }
     const dir = info.close >= info.open ? 'bull' : 'bear';
-    const f = (n: number, d = 4): string => n.toLocaleString(undefined, { maximumFractionDigits: d });
-    const vol = info.volume !== null ? `<span class="tt-k">V</span><span class="tt-v">${f(info.volume, 0)}</span>` : '';
+    const f = (n: number, d = 4): string => n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+    const change = ((info.close - info.open) / info.open) * 100;
+    const changeDir = change >= 0 ? 'bull' : 'bear';
+    const vol = info.volume !== null ? `<div class="tt-item"><span class="tt-k">V</span><span class="tt-v">${info.volume.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>` : '';
+    
     tooltipEl.innerHTML = `
-      <span class="tt-k">O</span><span class="tt-v">${f(info.open)}</span>
-      <span class="tt-k">H</span><span class="tt-v">${f(info.high)}</span>
-      <span class="tt-k">L</span><span class="tt-v">${f(info.low)}</span>
-      <span class="tt-k">C</span><span class="tt-v ${dir}">${f(info.close)}</span>
+      <div class="tt-item"><span class="tt-k">O</span><span class="tt-v">${f(info.open)}</span></div>
+      <div class="tt-item"><span class="tt-k">H</span><span class="tt-v">${f(info.high)}</span></div>
+      <div class="tt-item"><span class="tt-k">L</span><span class="tt-v">${f(info.low)}</span></div>
+      <div class="tt-item"><span class="tt-k">C</span><span class="tt-v ${dir}">${f(info.close)}</span></div>
+      <div class="tt-item"><span class="tt-k">CHG</span><span class="tt-v ${changeDir}">${change >= 0 ? '+' : ''}${change.toFixed(2)}%</span></div>
       ${vol}`;
     tooltipEl.removeAttribute('hidden');
   });
@@ -219,6 +227,7 @@ const main = (): void => {
     activeState = state;
     writeHash(state);
     setSymbolLabels(state);
+    chart.setSymbol(state.symbol);
     watchlist.setActive(state.provider, state.symbol);
     drawings.setSymbol(state.provider, state.symbol);
     renderIntervals();
@@ -239,7 +248,7 @@ const main = (): void => {
       (history) => {
         currentCandles = history;
         chart.setHistory(history);
-        chart.setIndicators(indicatorPicker.current());
+        applyIndicators(indicatorPicker.current());
         scriptManager.setCandles(history);
       },
       (upd) => {
@@ -270,7 +279,10 @@ const main = (): void => {
 
   // Header ticker (BID/ASK/SPREAD/price)
   let lastPrice: number | null = null;
-  const fmt = (n: number, d = 4): string => n.toLocaleString(undefined, { maximumFractionDigits: d });
+  const fmt = (n: number): string => {
+    const p = chart.getPrecision();
+    return n.toLocaleString(undefined, { minimumFractionDigits: p, maximumFractionDigits: p });
+  };
   const updateHeaderPrice = (price: number): void => {
     if (!Number.isFinite(price) || price <= 0) return;
     const hdrPrice = document.getElementById('hdr-price');
@@ -352,3 +364,9 @@ const main = (): void => {
 };
 
 main();
+
+const arrEq = (a: number[], b: number[]): boolean => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
+  return true;
+};

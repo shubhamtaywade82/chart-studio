@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "lightweight-charts": "^5.0.0"
+    "lightweight-charts": "^5.0.2"
   },
   "devDependencies": {
     "typescript": "^5.7.3",

@@ -1,112 +1,65 @@
-import type { Candle } from '../provider-client';
-import { bollinger, ema, macd, rsi, vwap } from './math';
-
-export type Pane = 'overlay' | 'rsi' | 'macd';
-
-export interface SeriesSpec {
-  label: string;
-  color: string;
-  values: number[];
-  pane: Pane;
-  /** "line" | "histogram". */
-  kind?: 'line' | 'histogram';
-  /** lightweight-charts price-scale id when not overlay. */
-  priceScaleId?: string;
-}
+/**
+ * klinecharts built-in indicator catalog (subset). The library ships
+ * 30+ — we surface the most common ones here. Each entry tells the
+ * picker whether it overlays on the candle pane (e.g. MA, BOLL) or
+ * creates a sub-pane (VOL, RSI, MACD).
+ */
 
 export interface IndicatorDef {
-  id: string;
+  id: string;        // klinecharts indicator name
   label: string;
-  /** Defaults shown in the configure dialog. */
-  defaults: Record<string, number>;
-  compute(candles: Candle[], params: Record<string, number>): SeriesSpec[];
+  /** Show on main candle pane vs separate sub-pane. */
+  onMain: boolean;
+  /** Default calcParams (klinecharts uses tuple-style params). */
+  defaults: number[];
+  /** Human description of each calc param slot. */
+  paramLabels: string[];
 }
 
-const closes = (c: Candle[]): number[] => c.map((x) => x.close);
-
 export const INDICATORS: IndicatorDef[] = [
-  {
-    id: 'ema',
-    label: 'EMA',
-    defaults: { period: 21 },
-    compute(c, p) {
-      const v = ema(closes(c), Math.max(1, Math.round(p.period ?? 21)));
-      return [{ label: `EMA ${p.period}`, color: '#58a6ff', values: v, pane: 'overlay' }];
-    },
-  },
-  {
-    id: 'ema-multi',
-    label: 'EMA 9/21/50',
-    defaults: {},
-    compute(c) {
-      const v = closes(c);
-      return [
-        { label: 'EMA 9', color: '#f0b400', values: ema(v, 9), pane: 'overlay' },
-        { label: 'EMA 21', color: '#58a6ff', values: ema(v, 21), pane: 'overlay' },
-        { label: 'EMA 50', color: '#bc8cff', values: ema(v, 50), pane: 'overlay' },
-      ];
-    },
-  },
-  {
-    id: 'bollinger',
-    label: 'Bollinger Bands',
-    defaults: { period: 20, mult: 2 },
-    compute(c, p) {
-      const bb = bollinger(closes(c), Math.round(p.period ?? 20), p.mult ?? 2);
-      return [
-        { label: 'BB upper', color: '#8b949e', values: bb.upper, pane: 'overlay' },
-        { label: 'BB mid',   color: '#f0b400', values: bb.middle, pane: 'overlay' },
-        { label: 'BB lower', color: '#8b949e', values: bb.lower, pane: 'overlay' },
-      ];
-    },
-  },
-  {
-    id: 'vwap',
-    label: 'Session VWAP',
-    defaults: {},
-    compute(c) {
-      return [{ label: 'VWAP', color: '#3fb950', values: vwap(c), pane: 'overlay' }];
-    },
-  },
-  {
-    id: 'rsi',
-    label: 'RSI',
-    defaults: { period: 14 },
-    compute(c, p) {
-      return [{ label: `RSI ${p.period ?? 14}`, color: '#bc8cff', values: rsi(closes(c), Math.round(p.period ?? 14)), pane: 'rsi', priceScaleId: 'rsi' }];
-    },
-  },
-  {
-    id: 'macd',
-    label: 'MACD',
-    defaults: { fast: 12, slow: 26, signal: 9 },
-    compute(c, p) {
-      const m = macd(closes(c), Math.round(p.fast ?? 12), Math.round(p.slow ?? 26), Math.round(p.signal ?? 9));
-      return [
-        { label: 'MACD',   color: '#58a6ff', values: m.macd,   pane: 'macd', priceScaleId: 'macd' },
-        { label: 'signal', color: '#f0b400', values: m.signal, pane: 'macd', priceScaleId: 'macd' },
-        { label: 'hist',   color: '#3fb950', values: m.hist,   pane: 'macd', priceScaleId: 'macd', kind: 'histogram' },
-      ];
-    },
-  },
+  // Overlays
+  { id: 'MA',   label: 'Moving Average',         onMain: true,  defaults: [5, 10, 30, 60], paramLabels: ['fast', 'mid', 'slow', 'long'] },
+  { id: 'EMA',  label: 'Exponential MA',         onMain: true,  defaults: [9, 21, 50, 200], paramLabels: ['ema1', 'ema2', 'ema3', 'ema4'] },
+  { id: 'SMA',  label: 'Smoothed MA',            onMain: true,  defaults: [12, 2], paramLabels: ['period', 'weight'] },
+  { id: 'BOLL', label: 'Bollinger Bands',        onMain: true,  defaults: [20, 2], paramLabels: ['period', 'mult'] },
+  { id: 'BBI',  label: 'Bull-Bear Index',        onMain: true,  defaults: [3, 6, 12, 24], paramLabels: ['p1', 'p2', 'p3', 'p4'] },
+  { id: 'SAR',  label: 'Parabolic SAR',          onMain: true,  defaults: [2, 2, 20], paramLabels: ['start', 'step', 'max'] },
+  // Sub-panes
+  { id: 'VOL',  label: 'Volume',                 onMain: false, defaults: [5, 10, 20], paramLabels: ['ma1', 'ma2', 'ma3'] },
+  { id: 'MACD', label: 'MACD',                   onMain: false, defaults: [12, 26, 9], paramLabels: ['fast', 'slow', 'signal'] },
+  { id: 'KDJ',  label: 'KDJ Stochastic',         onMain: false, defaults: [9, 3, 3], paramLabels: ['period', 'k', 'd'] },
+  { id: 'RSI',  label: 'RSI',                    onMain: false, defaults: [6, 12, 24], paramLabels: ['rsi1', 'rsi2', 'rsi3'] },
+  { id: 'CCI',  label: 'CCI',                    onMain: false, defaults: [13], paramLabels: ['period'] },
+  { id: 'OBV',  label: 'On-Balance Volume',      onMain: false, defaults: [30], paramLabels: ['ma'] },
+  { id: 'DMI',  label: 'Directional Movement',   onMain: false, defaults: [14, 6], paramLabels: ['period', 'ma'] },
+  { id: 'ATR',  label: 'Average True Range',     onMain: false, defaults: [14], paramLabels: ['period'] },
+  { id: 'WR',   label: 'Williams %R',            onMain: false, defaults: [6, 10, 14], paramLabels: ['wr1', 'wr2', 'wr3'] },
+  { id: 'PSY',  label: 'Psychological Line',     onMain: false, defaults: [12, 6], paramLabels: ['period', 'ma'] },
+  { id: 'TRIX', label: 'TRIX',                   onMain: false, defaults: [12, 20], paramLabels: ['period', 'ma'] },
+  { id: 'ROC',  label: 'Rate of Change',         onMain: false, defaults: [12, 6], paramLabels: ['period', 'ma'] },
+  { id: 'MTM',  label: 'Momentum',               onMain: false, defaults: [6, 10], paramLabels: ['period', 'ma'] },
+  { id: 'EMV',  label: 'Ease of Movement',       onMain: false, defaults: [14, 9], paramLabels: ['period', 'ma'] },
+  { id: 'VR',   label: 'Volume Ratio',           onMain: false, defaults: [24, 30], paramLabels: ['period', 'ma'] },
 ];
 
 export interface ActiveIndicator {
-  /** Instance id (uuid-ish) so multiple copies can coexist. */
   uid: string;
   defId: string;
-  params: Record<string, number>;
+  params: number[];
 }
 
-const STORAGE_KEY = 'chart-studio:indicators:v1';
+const STORAGE_KEY = 'chart-studio:indicators:v2';
 
 export const loadActiveIndicators = (): ActiveIndicator[] => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [{ uid: 'default-ema', defId: 'ema-multi', params: {} }];
+    if (!raw) return [
+      { uid: 'default-ema', defId: 'EMA', params: [9, 21, 50, 200] },
+      { uid: 'default-macd', defId: 'MACD', params: [12, 26, 9] },
+    ];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((x) => x && typeof x.defId === 'string');
+    return parsed.filter((x) => x && typeof x.defId === 'string' && Array.isArray(x.params));
   } catch {
     return [];
   }

@@ -268,17 +268,21 @@ body::before {
 .candle-theme-label { text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
 #candle-theme-select { appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 22px; background-image: linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%), linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%); background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%; background-size: 4px 4px, 4px 4px; background-repeat: no-repeat; }
 
-/* Chart crosshair tooltip */
+/* Chart crosshair tooltip (Binance-style OHLC overlay) */
 .chart-tooltip {
-  position: absolute; top: 10px; left: 10px; z-index: 7;
-  font-family: var(--font-mono); font-size: 10px; color: var(--text-primary);
-  background: rgba(8,11,20,0.88); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); padding: 6px 10px;
-  pointer-events: none; box-shadow: 0 6px 20px rgba(0,0,0,0.35);
-  display: flex; flex-wrap: wrap; gap: 4px 10px;
+  position: absolute; top: 8px; left: 12px; z-index: 7;
+  font-family: var(--font-mono); font-size: 11px;
+  background: rgba(13, 17, 25, 0.6);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 4px; padding: 4px 10px;
+  pointer-events: none;
+  display: flex; flex-wrap: wrap; gap: 4px 12px;
+  color: var(--text-secondary);
 }
 .chart-tooltip[hidden] { display: none !important; }
-.chart-tooltip .tt-k { color: var(--text-dim); font-weight: 600; text-transform: uppercase; font-size: 9px; letter-spacing: 0.3px; }
+.chart-tooltip .tt-item { display: flex; align-items: baseline; gap: 4px; }
+.chart-tooltip .tt-k { color: var(--text-dim); font-weight: 600; font-size: 10px; }
 .chart-tooltip .tt-v { color: var(--text-primary); font-weight: 500; }
 .chart-tooltip .tt-v.bull { color: var(--bull); }
 .chart-tooltip .tt-v.bear { color: var(--bear); }
