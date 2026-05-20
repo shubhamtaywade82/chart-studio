@@ -447,6 +447,7 @@ export class ChartView {
 
     const color = animatedPrice >= last.open ? '#2ebd85' : '#f6465d';
     this.ltp.setLtp(animatedPrice, color, t);
+    if (this.intervalMs > 0) this.ltp.setBarTiming(this.intervalMs, last.openTime);
   }
 
   clearLastTradePrice(): void {

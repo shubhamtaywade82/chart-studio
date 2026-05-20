@@ -23,17 +23,24 @@ export class LtpPrimitive implements ISeriesPrimitive<Time> {
   private color = '#2ebd85';
   private startTime: UTCTimestamp | null = null;
   private requestUpdate: (() => void) | null = null;
+  private intervalMs = 0;
+  private barStartMs = 0;
+  private tickTimer: ReturnType<typeof setInterval> | null = null;
 
   attached(param: SeriesAttachedParameter<Time, SeriesType>): void {
     this.chart = param.chart as IChartApi;
     this.series = param.series as ISeriesApi<SeriesType>;
     this.requestUpdate = param.requestUpdate;
+    this.tickTimer = setInterval(() => {
+      if (this.intervalMs > 0 && this.barStartMs > 0 && this.price !== null) this.requestUpdate?.();
+    }, 1000);
   }
 
   detached(): void {
     this.chart = null;
     this.series = null;
     this.requestUpdate = null;
+    if (this.tickTimer) { clearInterval(this.tickTimer); this.tickTimer = null; }
   }
 
   setLtp(price: number | null, color: string, startTime: UTCTimestamp | null): void {
@@ -41,6 +48,26 @@ export class LtpPrimitive implements ISeriesPrimitive<Time> {
     this.color = color;
     this.startTime = startTime;
     this.requestUpdate?.();
+  }
+
+  setBarTiming(intervalMs: number, barStartMs: number): void {
+    this.intervalMs = intervalMs;
+    this.barStartMs = barStartMs;
+    this.requestUpdate?.();
+  }
+
+  _countdown(): string | null {
+    if (this.intervalMs <= 0 || this.barStartMs <= 0) return null;
+    const remaining = Math.max(0, this.intervalMs - (Date.now() - this.barStartMs));
+    const total = Math.ceil(remaining / 1000);
+    if (total >= 3600) {
+      const h = Math.floor(total / 3600);
+      const m = Math.floor((total % 3600) / 60);
+      return `${h}h ${m.toString().padStart(2, '0')}m`;
+    }
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
   }
 
   updateAllViews(): void {}
@@ -51,7 +78,9 @@ export class LtpPrimitive implements ISeriesPrimitive<Time> {
 
   priceAxisViews(): ISeriesPrimitiveAxisView[] {
     if (this.price === null) return [];
-    return [new LtpPriceAxisView(this)];
+    const views: ISeriesPrimitiveAxisView[] = [new LtpPriceAxisView(this)];
+    if (this._countdown() !== null) views.push(new LtpCountdownAxisView(this));
+    return views;
   }
 
   _state(): { chart: IChartApi | null; series: ISeriesApi<SeriesType> | null; price: number | null; color: string; startTime: UTCTimestamp | null } {
@@ -135,4 +164,23 @@ class LtpPriceAxisView implements ISeriesPrimitiveAxisView {
   backColor(): string { return this.p._state().color; }
   visible(): boolean { return this.p._state().price !== null; }
   tickVisible(): boolean { return true; }
+}
+
+class LtpCountdownAxisView implements ISeriesPrimitiveAxisView {
+  constructor(private readonly p: LtpPrimitive) {}
+
+  coordinate(): number {
+    const { series, price } = this.p._state();
+    if (!series || price === null) return -1;
+    const y = series.priceToCoordinate(price);
+    if (y === null) return -1;
+    // ~18px below the price label so the two stack on the axis.
+    return y + 18;
+  }
+
+  text(): string { return this.p._countdown() ?? ''; }
+  textColor(): string { return '#ffffff'; }
+  backColor(): string { return 'rgba(60, 64, 75, 0.95)'; }
+  visible(): boolean { return this.p._countdown() !== null && this.p._state().price !== null; }
+  tickVisible(): boolean { return false; }
 }

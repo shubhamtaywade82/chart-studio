@@ -128,7 +128,11 @@ export class DhanTokenManager implements TokenProvider {
   private cached: { creds: DhanCreds; expiresAt: number } | null = null;
   private inflight: Promise<DhanCreds> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private lastTotpAttempt: number | null = null;
   private onRotateFn: ((creds: DhanCreds) => void) | null = null;
+  
+  private lastTotpAttempt = 0;
+  private lastFailure: { err: Error; ts: number } | null = null;
   
   private readonly authMode: string;
   private readonly clientId: string;
@@ -160,7 +164,7 @@ export class DhanTokenManager implements TokenProvider {
 
     this.authMode = (opts.authMode ?? process.env.DHAN_AUTH_MODE ?? defaultMode).toLowerCase().trim();
     
-    this.cachePath = opts.cachePath ?? path.resolve(process.cwd(), '.dhan_token_cache.json');
+    this.cachePath = opts.cachePath ?? process.env.DHAN_CACHE_PATH ?? path.resolve(process.cwd(), '.dhan_token_cache.json');
     
     // Proactive refresh buffer: default to 30 minutes to match Ruby BUFFER_MINUTES
     this.preExpiryMs = opts.preExpiryMs ?? 30 * 60 * 1000;
@@ -194,77 +198,94 @@ export class DhanTokenManager implements TokenProvider {
   private async refresh(): Promise<DhanCreds> {
     if (this.inflight) return this.inflight;
     
+    // If we had a failure recently (within 2 mins), don't hammer the API again,
+    // especially for TOTP which has a strict 2-min rule on Dhan side.
+    if (this.lastFailure && Date.now() - this.lastFailure.ts < 120_000) {
+      console.warn(`[dhanhq-token] skipping refresh due to recent failure (cooldown active): ${this.lastFailure.err.message}`);
+      throw this.lastFailure.err;
+    }
+
     this.inflight = (async () => {
       try {
-        // 1. Try to load from file cache first if memory cache is empty
-        if (!this.cached) {
-          const cachedFromFile = this.loadFileCache();
-          if (cachedFromFile && Date.now() < cachedFromFile.expiresAt - this.preExpiryMs) {
-            console.log('[dhanhq-token] using valid token from file cache');
-            this.cached = cachedFromFile;
-            this.applyTokenToRuntime(cachedFromFile.creds.accessToken);
-            this.scheduleNextRefresh(cachedFromFile.expiresAt);
-            return cachedFromFile.creds;
-          }
-        }
-
-        // 2. Fetch fresh token based on resolved strategy
-        let result: { accessToken: string; expiresAt: number };
-        
-        switch (this.authMode) {
-          case 'manual':
-            result = this.getManualToken();
-            break;
-            
-          case 'renew':
-            try {
-              const currentToken = this.cached?.creds.accessToken || this.loadFileCache()?.creds.accessToken;
-              if (!currentToken) {
-                throw new Error('No existing token found for renew strategy');
-              }
-              result = await this.renewToken(currentToken);
-            } catch (err) {
-              console.warn('[dhanhq-token] renew strategy failed. Falling back to TOTP strategy if credentials are set.', err);
-              if (this.clientId && this.pin && this.totpSecret) {
-                result = await this.getTotpToken();
-              } else {
-                throw err;
-              }
-            }
-            break;
-            
-          case 'authority':
-            result = await this.getAuthorityToken();
-            break;
-            
-          case 'totp':
-          default:
-            result = await this.getTotpToken();
-            break;
-        }
-
-        const creds: DhanCreds = {
-          clientId: this.clientId || (this.authMode === 'authority' ? await this.extractClientId(result.accessToken) : ''),
-          accessToken: result.accessToken
-        };
-
-        const safeExpiry = result.expiresAt > Date.now() ? result.expiresAt : Date.now() + this.minRefreshMs;
-        
-        this.cached = { creds, expiresAt: safeExpiry };
-        
-        // 3. Persist and apply the fresh token
-        this.writeFileCache(this.cached);
-        this.applyTokenToRuntime(creds.accessToken);
-        this.scheduleNextRefresh(safeExpiry);
-        this.onRotateFn?.(creds);
-        
+        // ... (rest of implementation remains similar, but I'll wrap the logic to capture failure)
+        const creds = await this.doRefresh();
+        this.lastFailure = null; // Clear failure on success
         return creds;
+      } catch (err) {
+        this.lastFailure = { err: err instanceof Error ? err : new Error(String(err)), ts: Date.now() };
+        throw err;
       } finally {
         this.inflight = null;
       }
     })();
 
     return this.inflight;
+  }
+
+  private async doRefresh(): Promise<DhanCreds> {
+    // 1. Try to load from file cache first if memory cache is empty
+    if (!this.cached) {
+      const cachedFromFile = this.loadFileCache();
+      if (cachedFromFile && Date.now() < cachedFromFile.expiresAt - this.preExpiryMs) {
+        console.log('[dhanhq-token] using valid token from file cache');
+        this.cached = cachedFromFile;
+        this.applyTokenToRuntime(cachedFromFile.creds.accessToken);
+        this.scheduleNextRefresh(cachedFromFile.expiresAt);
+        return cachedFromFile.creds;
+      }
+    }
+
+    // 2. Fetch fresh token based on resolved strategy
+    let result: { accessToken: string; expiresAt: number };
+    
+    switch (this.authMode) {
+      case 'manual':
+        result = this.getManualToken();
+        break;
+        
+      case 'renew':
+        try {
+          const currentToken = this.cached?.creds.accessToken || this.loadFileCache()?.creds.accessToken;
+          if (!currentToken) {
+            throw new Error('No existing token found for renew strategy');
+          }
+          result = await this.renewToken(currentToken);
+        } catch (err) {
+          console.warn('[dhanhq-token] renew strategy failed. Falling back to TOTP strategy if credentials are set.', err);
+          if (this.clientId && this.pin && this.totpSecret) {
+            result = await this.getTotpToken();
+          } else {
+            throw err;
+          }
+        }
+        break;
+        
+      case 'authority':
+        result = await this.getAuthorityToken();
+        break;
+        
+      case 'totp':
+      default:
+        result = await this.getTotpToken();
+        break;
+    }
+
+    const creds: DhanCreds = {
+      clientId: this.clientId || (this.authMode === 'authority' ? await this.extractClientId(result.accessToken) : ''),
+      accessToken: result.accessToken
+    };
+
+    const safeExpiry = result.expiresAt > Date.now() ? result.expiresAt : Date.now() + this.minRefreshMs;
+    
+    this.cached = { creds, expiresAt: safeExpiry };
+    
+    // 3. Persist and apply the fresh token
+    this.writeFileCache(this.cached);
+    this.applyTokenToRuntime(creds.accessToken);
+    this.scheduleNextRefresh(safeExpiry);
+    this.onRotateFn?.(creds);
+    
+    return creds;
   }
 
   private getManualToken(): { accessToken: string; expiresAt: number } {
@@ -282,6 +303,14 @@ export class DhanTokenManager implements TokenProvider {
     if (!this.clientId) throw new Error('totp strategy: DHAN_CLIENT_ID / CLIENT_ID is missing');
     if (!this.pin) throw new Error('totp strategy: DHAN_PIN is missing');
     if (!this.totpSecret) throw new Error('totp strategy: DHAN_TOTP_SECRET is missing');
+
+    const now = Date.now();
+    const elapsed = now - this.lastTotpAttempt;
+    if (elapsed < 120_000) {
+      const wait = Math.ceil((120_000 - elapsed) / 1000);
+      throw new Error(`TOTP authentication cooldown: please wait ${wait}s. Dhan allows generation once every 2 minutes.`);
+    }
+    this.lastTotpAttempt = now;
 
     const otp = generateTOTP(this.totpSecret);
     console.log(`[dhanhq-token] resolving totp strategy (clientId: ${this.clientId})`);
