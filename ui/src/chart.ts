@@ -40,6 +40,7 @@ export class ChartView {
   private ltpAnimator: SmoothPriceAnimator;
   private candles: Candle[] = [];
   private theme: CandleTheme = loadCandleTheme();
+  private precision: number = 2;
   private resizeObs: ResizeObserver;
   private crosshairListeners = new Set<(c: CrosshairInfo | null) => void>();
   private liveListeners = new Set<(atLive: boolean) => void>();
@@ -106,7 +107,8 @@ export class ChartView {
 
     this.series = this.chart.addSeries(CandlestickSeries, {
       ...this.theme.options,
-      priceLineVisible: false,
+      priceLineVisible: true,
+      priceLineStyle: LineStyle.Dashed,
       lastValueVisible: true,
     });
 
@@ -250,6 +252,28 @@ export class ChartView {
   }
 
   // ── Data ────────────────────────────────────────────────────────────
+
+  private autoDetectPrecision(prices: number[]): void {
+    let p = this.precision;
+    for (const val of prices) {
+      const s = val.toString();
+      if (s.includes('.')) {
+        p = Math.max(p, s.split('.')[1].length);
+      }
+    }
+
+    if (p > this.precision) {
+      console.log(`[ChartView] Precision upgraded to ${p}`);
+      this.precision = p;
+      this.series.applyOptions({
+        priceFormat: {
+          type: 'price',
+          precision: this.precision,
+          minMove: 1 / Math.pow(10, this.precision),
+        },
+      });
+    }
+  }
 
   setHistory(candles: Candle[]): void {
     this.candles = [...candles].sort((a, b) => a.openTime - b.openTime);
@@ -742,6 +766,8 @@ export class ChartView {
   scrollToRealtime(): void {
     this.chart.timeScale().scrollToRealTime();
   }
+
+  api(): IChartApi { return this.chart; }
 
   private handleCrosshair(p: MouseEventParams): void {
     if (!p.time || p.point === undefined) {
