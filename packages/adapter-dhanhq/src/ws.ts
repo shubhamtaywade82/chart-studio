@@ -348,13 +348,18 @@ export class DhanStreamPool {
     }
     if (this.closed) return;
     const url = `${FEED_BASE}?version=2&token=${encodeURIComponent(creds.accessToken)}&clientId=${encodeURIComponent(creds.clientId)}&authType=2`;
+    console.log(`[adapter-dhanhq] Connecting to WebSocket (clientId: ${creds.clientId})`);
     const ws = new WebSocket(url);
     this.ws = ws;
 
     ws.on('open', () => {
+      console.log('[adapter-dhanhq] WebSocket connection opened successfully.');
       this.reconnectAttempts = 0;
       const list: DhanSubscription[] = [...this.subs.values()].map((s) => s.ins);
-      if (list.length > 0) this.sendSub(list);
+      if (list.length > 0) {
+        console.log(`[adapter-dhanhq] Re-subscribing to ${list.length} instruments on connection open`);
+        this.sendSub(list);
+      }
       this.startHeartbeat();
     });
 
@@ -404,15 +409,21 @@ export class DhanStreamPool {
       }
     });
 
-    ws.on('error', () => { /* let close handler schedule reconnect */ });
+    ws.on('error', (err) => {
+      console.error('[adapter-dhanhq] WebSocket error occurred:', err);
+    });
 
-    ws.on('close', (code) => {
+    ws.on('close', (code, reason) => {
+      console.warn(`[adapter-dhanhq] WebSocket closed: code=${code}, reason=${reason ? reason.toString() : 'none'}`);
       if (this.ws !== ws) return;
       this.ws = null;
       this.stopHeartbeat();
       if (this.closed) return;
       // 401-equivalent close codes — refresh token before next reconnect.
-      if (code === 1008 || code === 4001 || code === 4003) this.tokens.invalidate();
+      if (code === 1008 || code === 4001 || code === 4003) {
+        console.warn('[adapter-dhanhq] Invalid or expired credentials code detected. Invalidating token.');
+        this.tokens.invalidate();
+      }
       this.scheduleReconnectAfterError();
     });
   }
