@@ -58,22 +58,24 @@ const getSegmentTier = (ref: SymbolRef): number => {
   const prov = (ref.provider || '').toLowerCase();
 
   // 1. Indices
-  if (s.startsWith('IDX_I:') || seg === 'index') return 1;
+  if (seg === 'index' || s.startsWith('IDX_I:')) return 1;
 
-  // 2. Equity/Spot
-  if (s.startsWith('NSE_EQ:') || s.startsWith('BSE_EQ:') || seg === 'equity' || (prov.includes('binance') && seg === 'spot')) return 2;
+  // 2. Equity/Spot (including Crypto Spot)
+  if (seg === 'equity' || seg === 'spot' || s.startsWith('NSE_EQ:') || s.startsWith('BSE_EQ:')) return 2;
 
-  // 3. F&O/Futures
-  if (s.startsWith('NSE_FNO:') || s.startsWith('BSE_FNO:') || seg === 'futures' || (prov.includes('binance') && seg === 'futures')) {
-    // Distinguish between futures and options if possible
+  // 3. Futures (Indian & Crypto)
+  if (seg === 'futures' || (prov.includes('binance') && seg === 'futures')) return 3;
+  
+  // F&O bucket in Dhan might contain both, so we check for option indicators
+  if (s.startsWith('NSE_FNO:') || s.startsWith('BSE_FNO:')) {
     if (seg === 'option' || s.includes(' CALL') || s.includes(' PUT') || / \d{4} [CP]E$/.test(s)) return 5;
-    return 3;
+    return 3; // default to futures for FNO segment if not an option
   }
 
   // 4. Commodity
-  if (s.startsWith('MCX_COMM:') || seg === 'commodity') return 4;
+  if (seg === 'commodity' || s.startsWith('MCX_COMM:')) return 4;
 
-  // 5. Options (explicitly caught if not in FNO bucket)
+  // 5. Options
   if (seg === 'option') return 5;
 
   return 6;

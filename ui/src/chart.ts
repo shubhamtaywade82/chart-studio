@@ -36,6 +36,13 @@ export class ChartView {
   private chart: IChartApi;
   private series: ISeriesApi<'Candlestick'>;
   private volume: ISeriesApi<'Histogram'>;
+
+  /**
+   * Expose the main candlestick series for external consumers.
+   */
+  public mainSeries(): ISeriesApi<'Candlestick'> {
+    return this.series;
+  }
   private ltp: LtpPrimitive;
   private ltpAnimator: SmoothPriceAnimator;
   private candles: Candle[] = [];
@@ -258,7 +265,7 @@ export class ChartView {
     for (const val of prices) {
       const s = val.toString();
       if (s.includes('.')) {
-        p = Math.max(p, s.split('.')[1].length);
+        p = Math.max(p, s.split('.')[1]?.length ?? 0);
       }
     }
 
@@ -768,6 +775,14 @@ export class ChartView {
   }
 
   api(): IChartApi { return this.chart; }
+
+  xToTime(x: number): UTCTimestamp | null {
+    return this.chart.timeScale().coordinateToTime(x) as UTCTimestamp | null;
+  }
+
+  yToPrice(y: number): number | null {
+    return this.series.coordinateToPrice(y);
+  }
 
   private handleCrosshair(p: MouseEventParams): void {
     if (!p.time || p.point === undefined) {

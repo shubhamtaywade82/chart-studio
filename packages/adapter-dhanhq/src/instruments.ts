@@ -23,13 +23,42 @@ export interface DhanInstrument {
 }
 
 const segmentLabelFor = (instrumentType: string): string => {
-  if (instrumentType === 'EQUITY') return 'equity';
-  if (instrumentType === 'INDEX') return 'index';
-  if (instrumentType.startsWith('FUT')) return 'futures';
-  if (instrumentType.startsWith('OPT')) return 'option';
-  if (instrumentType === 'COMMODITY' || instrumentType === 'COM') return 'commodity';
-  if (instrumentType === 'CURRENCY' || instrumentType === 'CUR') return 'currency';
-  return instrumentType.toLowerCase();
+  const type = instrumentType.toUpperCase();
+  if (type === 'EQUITY' || type === 'EQ') return 'equity';
+  if (type === 'INDEX' || type === 'IDX') return 'index';
+  if (type.startsWith('FUT') || type === 'FT') return 'futures';
+  if (type.startsWith('OPT') || type === 'OP') return 'option';
+  if (type === 'COMMODITY' || type === 'COM') return 'commodity';
+  if (type === 'CURRENCY' || type === 'CUR') return 'currency';
+  return type.toLowerCase();
+};
+
+const segmentFromRow = (exchId: string, instrumentType: string, raw?: string): string => {
+  if (raw && raw.includes('_')) return raw;
+  
+  const type = instrumentType.toUpperCase();
+  const exch = exchId.toUpperCase();
+
+  if (type === 'INDEX' || type === 'IDX') return 'IDX_I';
+  
+  if (type === 'EQUITY' || type === 'EQ') {
+    if (exch === 'NSE') return 'NSE_EQ';
+    if (exch === 'BSE') return 'BSE_EQ';
+  }
+  
+  if (type.startsWith('FUT') || type === 'FT' || type.startsWith('OPT') || type === 'OP') {
+    if (exch === 'NSE') return 'NSE_FNO';
+    if (exch === 'BSE') return 'BSE_FNO';
+    if (exch === 'MCX') return 'MCX_COMM';
+  }
+  
+  if (type === 'CURRENCY' || type === 'CUR') {
+    if (exch === 'NSE') return 'NSE_CURRENCY';
+    if (exch === 'BSE') return 'BSE_CURRENCY';
+  }
+  
+  if (exch === 'MCX') return 'MCX_COMM';
+  return `${exch}_${type || 'EQ'}`;
 };
 
 const parseCsvLine = (line: string): string[] => {
@@ -75,45 +104,6 @@ const parseScripMaster = (csv: string): DhanInstrument[] => {
 
   const required = [cExch, cSecurityId, cSymbol, cInstrumentType];
   if (required.some((i) => i === -1)) return [];
-
-const segmentFromRow = (exchId: string, instrumentType: string, raw?: string): string => {
-  if (raw && raw.includes('_')) return raw;
-  
-  const type = instrumentType.toUpperCase();
-  const exch = exchId.toUpperCase();
-
-  if (type === 'INDEX' || type === 'IDX') return 'IDX_I';
-  
-  if (type === 'EQUITY' || type === 'EQ') {
-    if (exch === 'NSE') return 'NSE_EQ';
-    if (exch === 'BSE') return 'BSE_EQ';
-  }
-  
-  if (type.startsWith('FUT') || type === 'FT' || type.startsWith('OPT') || type === 'OP') {
-    if (exch === 'NSE') return 'NSE_FNO';
-    if (exch === 'BSE') return 'BSE_FNO';
-    if (exch === 'MCX') return 'MCX_COMM';
-  }
-  
-  if (type === 'CURRENCY' || type === 'CUR') {
-    if (exch === 'NSE') return 'NSE_CURRENCY';
-    if (exch === 'BSE') return 'BSE_CURRENCY';
-  }
-  
-  if (exch === 'MCX') return 'MCX_COMM';
-  return `${exch}_${type || 'EQ'}`;
-};
-
-const segmentLabelFor = (instrumentType: string): string => {
-  const type = instrumentType.toUpperCase();
-  if (type === 'EQUITY' || type === 'EQ') return 'equity';
-  if (type === 'INDEX' || type === 'IDX') return 'index';
-  if (type.startsWith('FUT') || type === 'FT') return 'futures';
-  if (type.startsWith('OPT') || type === 'OP') return 'option';
-  if (type === 'COMMODITY' || type === 'COM') return 'commodity';
-  if (type === 'CURRENCY' || type === 'CUR') return 'currency';
-  return type.toLowerCase();
-};
 
   const out: DhanInstrument[] = [];
   for (let i = 1; i < lines.length; i += 1) {
@@ -282,4 +272,3 @@ export const searchInstruments = (rows: DhanInstrument[], query: string, limit: 
   const combined = [...highPriority, ...lowPriority];
   return combined.slice(0, limit);
 };
-
