@@ -12,11 +12,17 @@ export class OrderBookPanel {
 
   constructor(private readonly root: HTMLElement, private readonly spreadEl: HTMLElement) {}
 
-  reset(snapshot: OrderBookSnapshot): void {
+  reset(snapshot: OrderBookSnapshot | null): void {
     this.bids.clear();
     this.asks.clear();
-    for (const [p, q] of snapshot.bids) if (q > 0) this.bids.set(p, q);
-    for (const [p, q] of snapshot.asks) if (q > 0) this.asks.set(p, q);
+    if (snapshot) {
+      if (snapshot.bids) {
+        for (const [p, q] of snapshot.bids) if (q > 0) this.bids.set(p, q);
+      }
+      if (snapshot.asks) {
+        for (const [p, q] of snapshot.asks) if (q > 0) this.asks.set(p, q);
+      }
+    }
     this.render();
   }
 
@@ -38,6 +44,16 @@ export class OrderBookPanel {
       }
     }
     this.render();
+  }
+
+  getSnapshot(): { bids: Array<[number, number]>; asks: Array<[number, number]> } {
+    const bids: Array<[number, number]> = [];
+    const asks: Array<[number, number]> = [];
+    for (const [p, q] of this.bids) bids.push([p, q]);
+    for (const [p, q] of this.asks) asks.push([p, q]);
+    bids.sort((a, b) => b[0] - a[0]);
+    asks.sort((a, b) => a[0] - b[0]);
+    return { bids, asks };
   }
 
   private topLevels(map: Map<number, number>, n: number, cmp: (a: Level, b: Level) => number): Level[] {

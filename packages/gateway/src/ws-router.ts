@@ -52,9 +52,16 @@ export class ClientSession {
     private readonly socket: WebSocket,
     private readonly bridge: RedisBridge,
   ) {
+    console.log('[gateway] ClientSession connected');
     socket.on('message', (raw) => this.onMessage(raw.toString()));
-    socket.on('close', () => this.dispose());
-    socket.on('error', () => this.dispose());
+    socket.on('close', () => {
+      console.log('[gateway] ClientSession disconnected');
+      this.dispose();
+    });
+    socket.on('error', (err) => {
+      console.error('[gateway] ClientSession socket error:', err);
+      this.dispose();
+    });
   }
 
   private send(frame: OutboundFrame): void {
@@ -71,9 +78,12 @@ export class ClientSession {
 
   private subscribe(msg: InboundSub): void {
     const key = msg.channel === 'candle' ? (msg.interval ?? '1m') : undefined;
+    console.log(`[gateway] Client sub: id=${msg.id} provider=${msg.provider} symbol=${msg.symbol} channel=${msg.channel} key=${key}`);
     const reqId = randomUUID();
 
+    let receivedAny = false;
     const listener = (env: DataEnvelope): void => {
+      receivedAny = true;
       this.send({
         id: msg.id,
         type: env.kind,
@@ -101,6 +111,24 @@ export class ClientSession {
       reqId,
     });
 
+    // If no snapshot or update arrives within 8s, surface an error frame to
+    // the client so the UI can show a stale/offline indicator instead of
+    // spinning forever. Channels that have no REST snapshot (trade/ticker/
+    // analytics/signal/annotation) still typically deliver an update tick
+    // within seconds during market hours.
+    const stallTimer = setTimeout(() => {
+      if (receivedAny) return;
+      this.send({
+        id: msg.id,
+        type: 'error',
+        provider: msg.provider,
+        symbol: msg.symbol,
+        channel: msg.channel,
+        key,
+        error: `provider ${msg.provider} offline or no data for ${msg.symbol}/${msg.channel} within 8s`,
+      });
+    }, 8000);
+
     this.subs.set(msg.id, {
       id: msg.id,
       provider: msg.provider,
@@ -108,6 +136,7 @@ export class ClientSession {
       channel: msg.channel,
       key,
       unsub: () => {
+        clearTimeout(stallTimer);
         unsubBridge();
         this.bridge.publishCtrl(msg.provider, {
           op: 'unsub',

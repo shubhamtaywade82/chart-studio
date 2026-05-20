@@ -3,6 +3,7 @@ import { ProviderClient, type Candle, type SymbolRef } from './provider-client';
 import { OrderBookPanel } from './panels/orderbook';
 import { TradeTapePanel } from './panels/trade-tape';
 import { SentimentPanel } from './panels/sentiment';
+import { MicrostructurePanel } from './panels/microstructure';
 import { GlobalSearch } from './search/global-search';
 import { ProviderSettings } from './settings/providers';
 import { WatchlistPanel } from './watchlist/watchlist';
@@ -12,8 +13,21 @@ import { AlertsPanel } from './alerts/panel';
 import { ScriptManager } from './scripts/editor';
 import { DrawingLayer, type DrawingTool } from './drawings/drawings';
 import { INDICATORS, type ActiveIndicator } from './indicators/registry';
+import { AIBriefPanel } from './panels/ai-brief';
+import { StrategySignalsPanel } from './panels/strategy-signals';
 
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
+
+const parseIntervalMs = (interval: string): number => {
+  const m = interval.match(/^(\d+)([mhd])$/);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  const unit = m[2];
+  if (unit === 'm') return n * 60_000;
+  if (unit === 'h') return n * 3_600_000;
+  if (unit === 'd') return n * 86_400_000;
+  return 0;
+};
 
 interface AppState {
   provider: string;
@@ -53,12 +67,15 @@ const main = (): void => {
   const ob = new OrderBookPanel(obRoot, obSpread);
   const tape = new TradeTapePanel(tapeRoot);
   const sentiment = new SentimentPanel(sentimentRoot);
+  const microstructure = new MicrostructurePanel();
   const settings = new ProviderSettings(client);
   const watchlist = new WatchlistPanel(watchlistRoot, client);
   const indicatorPicker = new IndicatorPicker();
   const alertEngine = new AlertEngine(client);
   const scriptManager = new ScriptManager(chart, client);
   const drawings = new DrawingLayer(chart, chartContainer);
+  const aiBrief = new AIBriefPanel();
+  const strategySignals = new StrategySignalsPanel(client);
 
   let activeState: AppState | null = parseHash();
   let currentCandles: Candle[] = [];
@@ -71,9 +88,8 @@ const main = (): void => {
 
   new AlertsPanel(alertEngine, () => (activeState ? { provider: activeState.provider, symbol: activeState.symbol } : null));
 
-  // Indicators - (Skipping for now while restoring lightweight-charts)
   const applyIndicators = (list: ActiveIndicator[]): void => {
-    // TODO: Re-implement indicator overlay in lightweight-charts if needed
+    chart.setIndicators(list);
   };
   indicatorPicker.onChange(applyIndicators);
 
@@ -219,8 +235,50 @@ const main = (): void => {
   };
 
   const tearDown = (): void => {
-    for (const u of unsubs) try { u(); } catch { /* noop */ }
+    for (const fn of unsubs) try { fn(); } catch { /* noop */ }
+    sentiment.reset();
+    microstructure.reset();
+    tape.reset();
+    ob.reset(null);
     unsubs.length = 0;
+  };
+
+  // Header ticker (BID/ASK/SPREAD/price)
+  let lastPrice: number | null = null;
+  const fmt = (n: number): string => {
+    const p = chart.getPrecision() ?? 2;
+    return n.toLocaleString(undefined, { minimumFractionDigits: p, maximumFractionDigits: p });
+  };
+
+  const updateHeaderPrice = (price: number): void => {
+    try {
+      if (typeof price !== 'number' || !isFinite(price) || price <= 0) return;
+      const hdrPrice = document.getElementById('hdr-price');
+      const hdrChange = document.getElementById('hdr-change');
+      if (hdrPrice) hdrPrice.textContent = fmt(price);
+      if (hdrChange && lastPrice !== null && lastPrice > 0) {
+        const pct = ((price - lastPrice) / lastPrice) * 100;
+        hdrChange.classList.remove('bull', 'bear', 'neutral');
+        hdrChange.classList.add(pct > 0 ? 'bull' : pct < 0 ? 'bear' : 'neutral');
+        hdrChange.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%`;
+      }
+      lastPrice = price;
+    } catch (e) {
+      console.warn('[header] failed to update price', e);
+    }
+  };
+
+  // updateHeaderTicker only writes bid/ask/spread — price/change are owned by updateHeaderPrice.
+  const updateHeaderTicker = (bid: number, ask: number): void => {
+    const hdrBid = document.getElementById('hdr-bid');
+    const hdrAsk = document.getElementById('hdr-ask');
+    const hdrSpread = document.getElementById('hdr-spread');
+    if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0) return;
+    const mid = (bid + ask) / 2;
+    const spread = ask - bid;
+    if (hdrBid) hdrBid.textContent = fmt(bid);
+    if (hdrAsk) hdrAsk.textContent = fmt(ask);
+    if (hdrSpread) hdrSpread.textContent = `${fmt(spread)} (${((spread / mid) * 10_000).toFixed(2)} bps)`;
   };
 
   const applyState = (state: AppState): void => {
@@ -228,9 +286,12 @@ const main = (): void => {
     writeHash(state);
     setSymbolLabels(state);
     chart.setSymbol(state.symbol);
+    chart.setIntervalMs(parseIntervalMs(state.interval));
     watchlist.setActive(state.provider, state.symbol);
     drawings.setSymbol(state.provider, state.symbol);
     renderIntervals();
+    aiBrief.refresh(state.provider, state.symbol, state.interval);
+    strategySignals.bind(state.provider, state.symbol, state.interval);
     tearDown();
     ob.reset({ lastUpdateId: 0, bids: [], asks: [], ts: 0 });
     tape.reset();
@@ -242,6 +303,22 @@ const main = (): void => {
     chart.clearLastTradePrice();
     lastPrice = null;
     scriptManager.setCandles([]);
+
+    chart.setLoadOlderCallback(async (oldestOpenTime: number) => {
+      try {
+        const params = new URLSearchParams({
+          provider: state.provider, symbol: state.symbol, interval: state.interval,
+          endTime: String(oldestOpenTime - 1), limit: '500',
+        });
+        const res = await fetch(`/api/candles/history?${params.toString()}`);
+        if (!res.ok) return;
+        const older = await res.json() as Candle[];
+        if (!Array.isArray(older) || older.length === 0) return;
+        chart.prependHistory(older);
+        currentCandles = [...older, ...currentCandles].sort((a, b) => a.openTime - b.openTime);
+        scriptManager.setCandles(currentCandles);
+      } catch { /* swallow */ }
+    });
 
     unsubs.push(client.streamCandles(
       state.provider, state.symbol, state.interval,
@@ -262,61 +339,58 @@ const main = (): void => {
     ));
     unsubs.push(client.streamDepth(
       state.provider, state.symbol,
-      (snap) => ob.reset(snap),
-      (delta) => ob.applyDelta(delta),
+      (snap) => {
+        ob.reset(snap);
+        if (snap) {
+          microstructure.updateDepth(snap.bids ?? [], snap.asks ?? []);
+        }
+      },
+      (delta) => {
+        ob.applyDelta(delta);
+        const fullSnap = ob.getSnapshot();
+        microstructure.updateDepth(fullSnap.bids, fullSnap.asks);
+      },
     ));
     unsubs.push(client.streamTrades(state.provider, state.symbol, (t) => {
+      updateHeaderPrice(t.price);
       tape.push(t);
       sentiment.push(t);
-      chart.setLastTradePrice(t.price);
-      updateHeaderPrice(t.price);
+      microstructure.pushTrade(t);
+      chart.setLastTradePrice(t.price, t.ts, t.qty);
+      chart.updateVolumeProfile(t.price, t.qty);
+      chart.renderVolumeProfile();
       if (t.makerSide) tapeSells += 1; else tapeBuys += 1;
       if (tapeBuysEl) tapeBuysEl.textContent = String(tapeBuys);
       if (tapeSellsEl) tapeSellsEl.textContent = String(tapeSells);
     }));
+
     unsubs.push(client.streamBookTicker(state.provider, state.symbol, (bt) => updateHeaderTicker(bt.bestBidPrice, bt.bestAskPrice)));
+    unsubs.push(client.streamAnalytics(state.provider, state.symbol, (data) => {
+      chart.updateAnalytics(data);
+      chart.renderVolumeProfile();
+      // Analytics stream often carries the latest LTP as well; use as fallback.
+      updateHeaderPrice(data.ltp);
+    }));
+    unsubs.push(client.streamAISignals(state.provider, state.symbol, (sig) => {
+      chart.applyAISignal(sig);
+    }));
+    unsubs.push(client.streamAIAnnotation(state.provider, state.symbol, (ann) => {
+      chart.applyAIAnnotation(ann);
+      if (ann.kind === 'reflex') {
+        const data = ann.data as { derived?: { volatilityRegime?: string; toxicity?: number } };
+        const reg = data.derived?.volatilityRegime;
+        const tox = data.derived?.toxicity;
+        microstructure.updateAI(reg, tox);
+      }
+    }));
   };
 
-  // Header ticker (BID/ASK/SPREAD/price)
-  let lastPrice: number | null = null;
-  const fmt = (n: number): string => {
-    const p = chart.getPrecision();
-    return n.toLocaleString(undefined, { minimumFractionDigits: p, maximumFractionDigits: p });
-  };
-  const updateHeaderPrice = (price: number): void => {
-    if (!Number.isFinite(price) || price <= 0) return;
-    const hdrPrice = document.getElementById('hdr-price');
-    const hdrChange = document.getElementById('hdr-change');
-    if (hdrPrice) hdrPrice.textContent = fmt(price);
-    if (hdrChange && lastPrice !== null && lastPrice > 0) {
-      const pct = ((price - lastPrice) / lastPrice) * 100;
-      hdrChange.classList.remove('bull', 'bear', 'neutral');
-      hdrChange.classList.add(pct > 0 ? 'bull' : pct < 0 ? 'bear' : 'neutral');
-      hdrChange.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%`;
-    }
-    lastPrice = price;
-  };
-  const updateHeaderTicker = (bid: number, ask: number): void => {
-    const hdrBid = document.getElementById('hdr-bid');
-    const hdrAsk = document.getElementById('hdr-ask');
-    const hdrSpread = document.getElementById('hdr-spread');
-    const hdrPrice = document.getElementById('hdr-price');
-    const hdrChange = document.getElementById('hdr-change');
-    if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0) return;
-    const mid = (bid + ask) / 2;
-    const spread = ask - bid;
-    if (hdrBid) hdrBid.textContent = fmt(bid);
-    if (hdrAsk) hdrAsk.textContent = fmt(ask);
-    if (hdrSpread) hdrSpread.textContent = `${fmt(spread)} (${((spread / mid) * 10_000).toFixed(2)} bps)`;
-    if (hdrPrice) hdrPrice.textContent = fmt(mid);
-    if (hdrChange && lastPrice !== null && lastPrice > 0) {
-      const pct = ((mid - lastPrice) / lastPrice) * 100;
-      hdrChange.classList.remove('bull', 'bear', 'neutral');
-      hdrChange.classList.add(pct > 0 ? 'bull' : pct < 0 ? 'bear' : 'neutral');
-      hdrChange.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%`;
-    }
-    lastPrice = mid;
-  };
+  // Global cross-instrument correlation: published to a fixed Redis topic
+  // by the AI engine. We expose a tiny REST-less SSE-style listener via the
+  // existing WS multiplexer.
+  client.streamAIAnnotation('ai', 'GLOBAL', (ann) => {
+    if (ann.kind === 'correlation') chart.applyAIAnnotation(ann);
+  });
 
   new GlobalSearch(
     client,
@@ -364,9 +438,3 @@ const main = (): void => {
 };
 
 main();
-
-const arrEq = (a: number[], b: number[]): boolean => {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
-  return true;
-};

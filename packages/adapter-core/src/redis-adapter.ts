@@ -161,6 +161,14 @@ export class RedisAdapter {
       case 'ticker':
         unsub = this.provider.streamBookTicker(msg.symbol, (t) => publish(t));
         break;
+      case 'analytics':
+        unsub = (this.provider as any).streamAnalytics?.(msg.symbol, (d: unknown) => publish(d)) ?? (() => undefined);
+        break;
+      case 'signal':
+      case 'annotation':
+        // Produced by the ai-engine microservice; data providers ignore these.
+        unsub = () => undefined;
+        break;
     }
     return { unsub, refs: 1 };
   }
@@ -177,6 +185,9 @@ export class RedisAdapter {
           break;
         case 'trade':
         case 'ticker':
+        case 'analytics':
+        case 'signal':
+        case 'annotation':
           // No REST snapshot — only live ticks.
           return;
       }
@@ -210,6 +221,14 @@ export class RedisAdapter {
         if (req.op === 'search') return { reqId: req.reqId, ok: true, data: await this.provider.searchSymbols(req.query ?? '', req.limit) };
         if (req.op === 'list')   return { reqId: req.reqId, ok: true, data: await this.provider.listSymbols(req.filter as { segment?: string } | undefined) };
         if (req.op === 'meta')   return { reqId: req.reqId, ok: true, data: await this.provider.getInstrumentMeta(req.symbol ?? '') };
+        if (req.op === 'candles') return {
+          reqId: req.reqId, ok: true,
+          data: await this.provider.getCandles(req.symbol ?? '', req.interval ?? '1m', {
+            limit: req.limit ?? 500,
+            ...(req.startTime !== undefined ? { startTime: req.startTime } : {}),
+            ...(req.endTime !== undefined ? { endTime: req.endTime } : {}),
+          }),
+        };
         return { reqId: req.reqId, ok: false, error: `unknown op: ${req.op}` };
       } catch (err) {
         return { reqId: req.reqId, ok: false, error: err instanceof Error ? err.message : String(err) };

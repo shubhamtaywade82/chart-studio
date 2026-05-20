@@ -21,10 +21,38 @@ export interface OrderBookSnapshot {
 export interface Trade { price: number; qty: number; ts: number; makerSide: boolean; tradeId?: number }
 export interface BookTicker { bestBidPrice: number; bestBidQty: number; bestAskPrice: number; bestAskQty: number; ts: number }
 
+export interface DepthLevel { price: number; qty: number; orders: number }
+
+export interface AnalyticsData {
+  ltp: number; atp: number; ltq: number; ltt: number;
+  volume: number; totalBuyQty: number; totalSellQty: number;
+  oi: number | undefined; highOi: number | undefined; lowOi: number | undefined;
+  dayOpen: number; dayHigh: number; dayLow: number; dayClose: number;
+  depthBids: DepthLevel[] | undefined; depthAsks: DepthLevel[] | undefined;
+  prevClose: number | undefined; prevOi: number | undefined;
+}
+
+export type Urgency = 'none' | 'watch_only' | 'next_5min' | 'this_candle' | 'immediate' | 'critical';
+
+export interface AISignal {
+  layer: 'reflex' | 'tactical';
+  type: string;
+  urgency: Urgency;
+  confidence: number;
+  narrative: string;
+  ts: number;
+}
+
+export interface AIAnnotation {
+  kind: 'tactical' | 'reflex' | 'narrative' | 'risk' | 'morning_brief' | 'correlation' | 'historical_echo' | 'confluence' | 'strategy_signal';
+  ts: number;
+  data: unknown;
+}
+
 export interface ProviderInfo { provider: string; displayName: string; online: boolean; lastSeen: number }
 export interface SymbolRef { provider: string; symbol: string; label?: string; segment?: string }
 
-export type Channel = 'candle' | 'depth' | 'trade' | 'ticker';
+export type Channel = 'candle' | 'depth' | 'trade' | 'ticker' | 'analytics' | 'signal' | 'annotation';
 
 type FrameKind = 'snapshot' | 'update' | 'error';
 
@@ -127,7 +155,7 @@ export class ProviderClient {
     return this.subscribe({ provider, symbol, channel: 'candle', interval }, onSnapshot, onUpdate);
   }
 
-  streamDepth(provider: string, symbol: string, onSnapshot: (s: OrderBookSnapshot) => void, onUpdate: (d: DepthDelta) => void): () => void {
+  streamDepth(provider: string, symbol: string, onSnapshot: (s: OrderBookSnapshot | null) => void, onUpdate: (d: DepthDelta) => void): () => void {
     return this.subscribe({ provider, symbol, channel: 'depth' }, onSnapshot, onUpdate);
   }
 
@@ -137,6 +165,18 @@ export class ProviderClient {
 
   streamBookTicker(provider: string, symbol: string, onTicker: (t: BookTicker) => void): () => void {
     return this.subscribe<unknown, BookTicker>({ provider, symbol, channel: 'ticker' }, () => undefined, onTicker);
+  }
+
+  streamAnalytics(provider: string, symbol: string, onData: (data: AnalyticsData) => void): () => void {
+    return this.subscribe<unknown, AnalyticsData>({ provider, symbol, channel: 'analytics' }, () => undefined, onData);
+  }
+
+  streamAISignals(provider: string, symbol: string, onSig: (sig: AISignal) => void): () => void {
+    return this.subscribe<unknown, AISignal>({ provider, symbol, channel: 'signal' }, () => undefined, onSig);
+  }
+
+  streamAIAnnotation(provider: string, symbol: string, onAnn: (ann: AIAnnotation) => void): () => void {
+    return this.subscribe<unknown, AIAnnotation>({ provider, symbol, channel: 'annotation' }, () => undefined, onAnn);
   }
 
   async listProviders(): Promise<ProviderInfo[]> {

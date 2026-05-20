@@ -8,17 +8,19 @@
     "packages/indicator-runtime",
     "packages/adapter-binance",
     "packages/adapter-dhanhq",
+    "packages/ai-engine",
     "packages/gateway",
     "ui"
   ],
   "scripts": {
-    "build": "npm run -w @chart-studio/adapter-core build && npm run -w @chart-studio/indicator-runtime build && npm run -w @chart-studio/gateway build && npm run -w @chart-studio/adapter-binance build && npm run -w @chart-studio/adapter-dhanhq build",
+    "build": "npm run -w @chart-studio/adapter-core build && npm run -w @chart-studio/indicator-runtime build && npm run -w @chart-studio/gateway build && npm run -w @chart-studio/adapter-binance build && npm run -w @chart-studio/adapter-dhanhq build && npm run -w @chart-studio/ai-engine build",
     "dev:gateway": "npm run -w @chart-studio/gateway dev",
     "dev:binance": "npm run -w @chart-studio/adapter-binance dev",
     "dev:dhanhq": "npm run -w @chart-studio/adapter-dhanhq dev",
+    "dev:ai": "npm run -w @chart-studio/ai-engine dev",
     "dev:ui": "npm run -w @chart-studio/ui dev",
-    "dev": "concurrently \"npm run dev:gateway\" \"npm run dev:binance\" \"npm run dev:dhanhq\" \"npm run dev:ui\"",
-    "typecheck": "tsc -b packages/adapter-core packages/gateway packages/adapter-binance packages/adapter-dhanhq"
+    "dev": "concurrently \"npm run dev:gateway\" \"npm run dev:binance\" \"npm run dev:dhanhq\" \"npm run dev:ai\" \"npm run dev:ui\"",
+    "typecheck": "tsc -b packages/adapter-core packages/gateway packages/adapter-binance packages/adapter-dhanhq packages/ai-engine"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
