@@ -296,13 +296,16 @@ export class AIOverlayManager {
     el = document.createElement('div');
     el.id = 'ai-narrative-bar';
     el.style.cssText = `
-      position: absolute; bottom: 0; left: 0; right: 0;
-      padding: 6px 14px;
+      position: absolute; bottom: 32px; left: 12px; right: 12px;
+      padding: 8px 16px;
       font-size: 12px;
       font-family: 'SF Mono', Consolas, monospace;
-      background: rgba(19,23,34,0.92);
-      border-left: 3px solid #9c9c9c;
-      border-top: 1px solid rgba(255,255,255,0.06);
+      background: rgba(19,23,34,0.95);
+      backdrop-filter: blur(8px);
+      border-left: 3px solid #7c4dff;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
       z-index: 105;
       display: none;
     `;
