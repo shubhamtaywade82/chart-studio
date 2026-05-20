@@ -123,7 +123,8 @@ class LtpPriceAxisView implements ISeriesPrimitiveAxisView {
   text(): string {
     const { series, price } = this.p._state();
     if (price === null) return '';
-    const precision = (series?.options() as any)?.priceFormat?.precision ?? 2;
+    const p = (series?.options() as any)?.priceFormat?.precision ?? 2;
+    const precision = Math.min(20, Math.max(0, p));
     return price.toLocaleString(undefined, {
       minimumFractionDigits: precision,
       maximumFractionDigits: precision,

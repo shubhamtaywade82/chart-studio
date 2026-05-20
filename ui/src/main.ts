@@ -241,17 +241,21 @@ const main = (): void => {
   };
 
   const updateHeaderPrice = (price: number): void => {
-    if (typeof price !== 'number' || !isFinite(price) || price <= 0) return;
-    const hdrPrice = document.getElementById('hdr-price');
-    const hdrChange = document.getElementById('hdr-change');
-    if (hdrPrice) hdrPrice.textContent = fmt(price);
-    if (hdrChange && lastPrice !== null && lastPrice > 0) {
-      const pct = ((price - lastPrice) / lastPrice) * 100;
-      hdrChange.classList.remove('bull', 'bear', 'neutral');
-      hdrChange.classList.add(pct > 0 ? 'bull' : pct < 0 ? 'bear' : 'neutral');
-      hdrChange.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%`;
+    try {
+      if (typeof price !== 'number' || !isFinite(price) || price <= 0) return;
+      const hdrPrice = document.getElementById('hdr-price');
+      const hdrChange = document.getElementById('hdr-change');
+      if (hdrPrice) hdrPrice.textContent = fmt(price);
+      if (hdrChange && lastPrice !== null && lastPrice > 0) {
+        const pct = ((price - lastPrice) / lastPrice) * 100;
+        hdrChange.classList.remove('bull', 'bear', 'neutral');
+        hdrChange.classList.add(pct > 0 ? 'bull' : pct < 0 ? 'bear' : 'neutral');
+        hdrChange.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%`;
+      }
+      lastPrice = price;
+    } catch (e) {
+      console.warn('[header] failed to update price', e);
     }
-    lastPrice = price;
   };
 
   // updateHeaderTicker only writes bid/ask/spread — price/change are owned by updateHeaderPrice.
@@ -311,10 +315,10 @@ const main = (): void => {
       (delta) => ob.applyDelta(delta),
     ));
     unsubs.push(client.streamTrades(state.provider, state.symbol, (t) => {
+      updateHeaderPrice(t.price);
       tape.push(t);
       sentiment.push(t);
       chart.setLastTradePrice(t.price, t.ts, t.qty);
-      updateHeaderPrice(t.price);
       if (t.makerSide) tapeSells += 1; else tapeBuys += 1;
       if (tapeBuysEl) tapeBuysEl.textContent = String(tapeBuys);
       if (tapeSellsEl) tapeSellsEl.textContent = String(tapeSells);
@@ -333,6 +337,13 @@ const main = (): void => {
       chart.applyAIAnnotation(ann);
     }));
   };
+
+  // Global cross-instrument correlation: published to a fixed Redis topic
+  // by the AI engine. We expose a tiny REST-less SSE-style listener via the
+  // existing WS multiplexer.
+  client.streamAIAnnotation('ai', 'GLOBAL', (ann) => {
+    if (ann.kind === 'correlation') chart.applyAIAnnotation(ann);
+  });
 
   new GlobalSearch(
     client,

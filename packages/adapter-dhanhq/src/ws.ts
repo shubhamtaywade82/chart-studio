@@ -329,15 +329,31 @@ export class DhanStreamPool {
     void this.connect();
   }
 
-  private scheduleReconnectAfterError(): void {
+  private scheduleReconnectAfterError(isRateLimit = false): void {
     if (this.closed) return;
     const attempt = ++this.reconnectAttempts;
-    const delay = Math.min(30_000, 500 * 2 ** Math.min(attempt, 6));
+    // Base exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s
+    let delay = Math.min(30_000, 500 * 2 ** Math.min(attempt, 6));
+    
+    // If rate limited, wait at least 15 seconds to allow server session cleanup
+    if (isRateLimit) {
+      delay = Math.max(delay, 15_000);
+      console.warn(`[adapter-dhanhq] Rate limit detected (429). Backing off for ${delay}ms before retry #${attempt}`);
+    }
+    
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => void this.connect(), delay);
   }
 
   private async connect(): Promise<void> {
     if (this.closed) return;
+    
+    // Clear any existing connection if called unexpectedly
+    if (this.ws) {
+      try { this.ws.terminate(); } catch { /* noop */ }
+      this.ws = null;
+    }
+
     let creds;
     try {
       creds = await this.tokens.get();
@@ -351,6 +367,17 @@ export class DhanStreamPool {
     console.log(`[adapter-dhanhq] Connecting to WebSocket (clientId: ${creds.clientId})`);
     const ws = new WebSocket(url);
     this.ws = ws;
+
+    // Handle unexpected response codes (like 429) before 'open'
+    ws.on('unexpected-response', (req, res) => {
+      console.error(`[adapter-dhanhq] WebSocket unexpected response: ${res.statusCode} ${res.statusMessage}`);
+      if (this.ws !== ws) return;
+      this.ws = null;
+      this.stopHeartbeat();
+      const is429 = res.statusCode === 429;
+      this.scheduleReconnectAfterError(is429);
+      try { ws.terminate(); } catch { /* noop */ }
+    });
 
     ws.on('open', () => {
       console.log('[adapter-dhanhq] WebSocket connection opened successfully.');

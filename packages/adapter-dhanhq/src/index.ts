@@ -1,17 +1,19 @@
 import { RedisAdapter } from '@chart-studio/adapter-core';
 import { DhanProvider } from './provider';
-import { AlgoScalperTokenProvider, StaticTokenProvider, NullTokenProvider, type TokenProvider } from './token-provider';
+import { DhanTokenManager, StaticTokenProvider, NullTokenProvider, type TokenProvider } from './token-provider';
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
-const ALGO_SCALPER_URL = process.env.ALGO_SCALPER_URL ?? '';
-const ALGO_SCALPER_API_KEY = process.env.ALGO_SCALPER_API_KEY ?? '';
-const CLIENT_ID = process.env.DHAN_CLIENT_ID ?? '';
+const CLIENT_ID = process.env.DHAN_CLIENT_ID ?? process.env.CLIENT_ID ?? '';
 const ACCESS_TOKEN = process.env.DHAN_ACCESS_TOKEN ?? '';
+const DHAN_AUTH_MODE = process.env.DHAN_AUTH_MODE ?? '';
 
 const buildTokens = (): TokenProvider => {
-  if (ALGO_SCALPER_URL) {
-    console.log(`[adapter-dhanhq] using algo_scalper_api at ${ALGO_SCALPER_URL}`);
-    return new AlgoScalperTokenProvider(ALGO_SCALPER_URL, ALGO_SCALPER_API_KEY ? { apiKey: ALGO_SCALPER_API_KEY } : {});
+  const hasTotp = process.env.DHAN_TOTP_SECRET && process.env.DHAN_PIN && CLIENT_ID;
+  const hasAuthority = process.env.TRADER_API_BASE_URL || process.env.ALGO_SCALPER_URL;
+  
+  if (DHAN_AUTH_MODE || hasTotp || hasAuthority) {
+    console.log(`[adapter-dhanhq] using DhanTokenManager (mode: ${DHAN_AUTH_MODE || (hasTotp ? 'totp' : 'authority')})`);
+    return new DhanTokenManager();
   }
   if (CLIENT_ID && ACCESS_TOKEN) {
     console.log('[adapter-dhanhq] using static DHAN_CLIENT_ID / DHAN_ACCESS_TOKEN');
