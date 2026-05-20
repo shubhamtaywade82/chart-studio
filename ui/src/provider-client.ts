@@ -44,7 +44,7 @@ export interface AISignal {
 }
 
 export interface AIAnnotation {
-  kind: 'tactical' | 'reflex' | 'narrative' | 'risk' | 'morning_brief' | 'correlation' | 'historical_echo' | 'confluence';
+  kind: 'tactical' | 'reflex' | 'narrative' | 'risk' | 'morning_brief' | 'correlation' | 'historical_echo' | 'confluence' | 'strategy_signal';
   ts: number;
   data: unknown;
 }

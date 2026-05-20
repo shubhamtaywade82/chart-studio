@@ -128,10 +128,8 @@ export class DhanTokenManager implements TokenProvider {
   private cached: { creds: DhanCreds; expiresAt: number } | null = null;
   private inflight: Promise<DhanCreds> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private lastTotpAttempt: number | null = null;
-  private onRotateFn: ((creds: DhanCreds) => void) | null = null;
-  
   private lastTotpAttempt = 0;
+  private onRotateFn: ((creds: DhanCreds) => void) | null = null;
   private lastFailure: { err: Error; ts: number } | null = null;
   
   private readonly authMode: string;

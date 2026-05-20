@@ -14,6 +14,7 @@ import { ScriptManager } from './scripts/editor';
 import { DrawingLayer, type DrawingTool } from './drawings/drawings';
 import { INDICATORS, type ActiveIndicator } from './indicators/registry';
 import { AIBriefPanel } from './panels/ai-brief';
+import { StrategySignalsPanel } from './panels/strategy-signals';
 
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
@@ -74,6 +75,7 @@ const main = (): void => {
   const scriptManager = new ScriptManager(chart, client);
   const drawings = new DrawingLayer(chart, chartContainer);
   const aiBrief = new AIBriefPanel();
+  const strategySignals = new StrategySignalsPanel(client);
 
   let activeState: AppState | null = parseHash();
   let currentCandles: Candle[] = [];
@@ -289,6 +291,7 @@ const main = (): void => {
     drawings.setSymbol(state.provider, state.symbol);
     renderIntervals();
     aiBrief.refresh(state.provider, state.symbol, state.interval);
+    strategySignals.bind(state.provider, state.symbol, state.interval);
     tearDown();
     ob.reset({ lastUpdateId: 0, bids: [], asks: [], ts: 0 });
     tape.reset();
