@@ -54,11 +54,7 @@ export class AnalyticsRenderer {
     this.dayLevelLastPrice?.clear();
   }
 
-  /**
-   * Allocate analytics series. Pane indices are negotiated externally to
-   * avoid colliding with indicator sub-panes (RSI/MACD also use 1+).
-   */
-  setupSeries(cvdPane: number, oiPane: number): void {
+  setupAtpSeries(): void {
     // ATP line overlay on main pane
     this.atpSeries = this.chart.addSeries(LineSeries, {
       color: '#ffaa00',
@@ -68,33 +64,51 @@ export class AnalyticsRenderer {
       priceLineVisible: false,
       lastValueVisible: false,
     });
+  }
 
+  setupCvdSeries(pane: number): void {
+    if (this.cvdSeries) return;
     // CVD histogram in sub-pane
     this.cvdSeries = this.chart.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' },
       title: 'CVD',
       priceScaleId: 'cvd',
-    }, cvdPane);
+    }, pane);
     this.chart.priceScale('cvd').applyOptions({
       scaleMargins: { top: 0.3, bottom: 0.05 },
     });
+  }
 
+  removeCvdSeries(): void {
+    if (this.cvdSeries) {
+      try { this.chart.removeSeries(this.cvdSeries); } catch { /* ignore */ }
+      this.cvdSeries = null;
+    }
+  }
+
+  setupOiSeries(pane: number): void {
+    if (this.oiSeries) return;
     // OI histogram in sub-pane
     this.oiSeries = this.chart.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' },
       title: 'OI Change',
       priceScaleId: 'oi',
-    }, oiPane);
+    }, pane);
     this.chart.priceScale('oi').applyOptions({
       scaleMargins: { top: 0.3, bottom: 0.05 },
     });
   }
 
-  update(state: AnalyticsState): void {
-    if (!this.atpSeries || !this.cvdSeries || !this.oiSeries) return;
+  removeOiSeries(): void {
+    if (this.oiSeries) {
+      try { this.chart.removeSeries(this.oiSeries); } catch { /* ignore */ }
+      this.oiSeries = null;
+    }
+  }
 
+  update(state: AnalyticsState): void {
     // ATP deviation
-    if (state.atp > 0) {
+    if (this.atpSeries && state.atp > 0) {
       const deviation = ((state.ltp - state.atp) / state.atp) * 100;
       let color = '#ffffff';
       if (deviation > 0.1) color = '#f6465d';
@@ -112,7 +126,7 @@ export class AnalyticsRenderer {
 
     // CVD: Dhan's totalBuyQty/totalSellQty are cumulative since market open.
     // We need per-tick deltas, then accumulate those into CVD.
-    if (state.totalBuyQty > 0 || state.totalSellQty > 0) {
+    if (this.cvdSeries && (state.totalBuyQty > 0 || state.totalSellQty > 0)) {
       if (!this.buyInit) {
         this.lastBuyQty = state.totalBuyQty;
         this.lastSellQty = state.totalSellQty;
@@ -129,7 +143,7 @@ export class AnalyticsRenderer {
     }
 
     // OI: skip first reading to avoid huge spurious bar on symbol switch.
-    if (state.oi !== undefined && state.oi > 0) {
+    if (this.oiSeries && state.oi !== undefined && state.oi > 0) {
       if (!this.oiInit) {
         this.lastOi = state.oi;
         this.oiInit = true;

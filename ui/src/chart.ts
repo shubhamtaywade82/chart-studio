@@ -139,10 +139,8 @@ export class ChartView {
     this.chart.timeScale().subscribeVisibleLogicalRangeChange((r) => this.handleRangeChange(r));
 
     this.analytics = new AnalyticsRenderer(this.chart, this.series);
-    // Panes 1/2 are reserved for CVD/OI. Indicator sub-panes (RSI/MACD)
-    // start at index 3 to avoid colliding with these.
-    this.analytics.setupSeries(1, 2);
-    this.indicatorBasePane = 3;
+    this.analytics.setupAtpSeries();
+    this.indicatorBasePane = 1;
 
     this.alertSystem = new AlertSystem();
     this.alertSystem.onAlertsChange((alerts) => {
@@ -157,7 +155,7 @@ export class ChartView {
 
   /** Day open ms timestamp used to extrapolate expected volume. */
   private dayOpenMs = 0;
-  private indicatorBasePane = 3;
+  private indicatorBasePane = 1;
 
   setSymbol(symbol: string): void {
     this.watermark?.applyOptions({
@@ -451,6 +449,10 @@ export class ChartView {
     }
     this.indicatorSeries.clear();
 
+    // Clean up dynamic analytics sub-panes
+    this.analytics?.removeCvdSeries();
+    this.analytics?.removeOiSeries();
+
     if (this.candles.length === 0) return;
 
     const closes = this.candles.map((c) => c.close);
@@ -467,6 +469,16 @@ export class ChartView {
       const added: Array<ISeriesApi<'Line'> | ISeriesApi<'Histogram'>> = [];
 
       switch (ind.defId) {
+        case 'CVD': {
+          const pane = nextSubPane++;
+          this.analytics?.setupCvdSeries(pane);
+          break;
+        }
+        case 'OI': {
+          const pane = nextSubPane++;
+          this.analytics?.setupOiSeries(pane);
+          break;
+        }
         case 'MA': {
           ind.params.forEach((period, i) => {
             if (!period) return;

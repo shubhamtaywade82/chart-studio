@@ -25,6 +25,8 @@ export const INDICATORS: IndicatorDef[] = [
   { id: 'BBI',  label: 'Bull-Bear Index',        onMain: true,  defaults: [3, 6, 12, 24], paramLabels: ['p1', 'p2', 'p3', 'p4'] },
   { id: 'SAR',  label: 'Parabolic SAR',          onMain: true,  defaults: [2, 2, 20], paramLabels: ['start', 'step', 'max'] },
   // Sub-panes
+  { id: 'CVD',  label: 'Cumulative Volume Delta', onMain: false, defaults: [], paramLabels: [] },
+  { id: 'OI',   label: 'Open Interest Change',    onMain: false, defaults: [], paramLabels: [] },
   { id: 'VOL',  label: 'Volume',                 onMain: false, defaults: [5, 10, 20], paramLabels: ['ma1', 'ma2', 'ma3'] },
   { id: 'MACD', label: 'MACD',                   onMain: false, defaults: [12, 26, 9], paramLabels: ['fast', 'slow', 'signal'] },
   { id: 'KDJ',  label: 'KDJ Stochastic',         onMain: false, defaults: [9, 3, 3], paramLabels: ['period', 'k', 'd'] },
