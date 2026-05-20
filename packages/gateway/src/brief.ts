@@ -52,17 +52,24 @@ export interface BriefResult {
 // ── State Cache ───────────────────────────────────────────────────────────────
 
 const snapshots = new Map<string, CachedSymbolState>();
-const candleCache = new Map<string, CandleData[]>();
+/** symbolKey -> interval -> candles */
+const candleCache = new Map<string, Map<string, CandleData[]>>();
 
 export function cacheAnalytics(provider: string, symbol: string, tick: TickData, derived: DerivedData, ts: number): void {
   const key = `${provider}:${symbol.toUpperCase()}`;
-  const candles = candleCache.get(key) ?? [];
-  snapshots.set(key, { provider, symbol: symbol.toUpperCase(), ts, tick, derived, candles });
+  // We don't attach candles here anymore; handleBriefRequest will gather them.
+  snapshots.set(key, { provider, symbol: symbol.toUpperCase(), ts, tick, derived, candles: [] });
 }
 
-export function cacheCandle(provider: string, symbol: string, candle: CandleData): void {
+export function cacheCandle(provider: string, symbol: string, interval: string, candle: CandleData): void {
   const key = `${provider}:${symbol.toUpperCase()}`;
-  const arr = candleCache.get(key) ?? [];
+  let intervals = candleCache.get(key);
+  if (!intervals) {
+    intervals = new Map();
+    candleCache.set(key, intervals);
+  }
+
+  const arr = intervals.get(interval) ?? [];
   const last = arr[arr.length - 1];
   if (last && last.openTime === candle.openTime) {
     arr[arr.length - 1] = candle;
@@ -70,13 +77,29 @@ export function cacheCandle(provider: string, symbol: string, candle: CandleData
     arr.push(candle);
     if (arr.length > 100) arr.shift();
   }
-  candleCache.set(key, arr);
+  intervals.set(interval, arr);
+
   const snap = snapshots.get(key);
-  if (snap) snap.candles = arr;
+  if (snap && (snap.candles.length === 0 || interval === '1m')) {
+    // Keep 1m candles as default in snap for backward compatibility if needed
+    snap.candles = arr;
+  }
 }
 
 function getState(provider: string, symbol: string): CachedSymbolState | null {
   return snapshots.get(`${provider}:${symbol.toUpperCase()}`) ?? null;
+}
+
+function getMultiTimeframeCandles(provider: string, symbol: string): Record<string, CandleData[]> {
+  const key = `${provider}:${symbol.toUpperCase()}`;
+  const intervals = candleCache.get(key);
+  if (!intervals) return {};
+
+  const result: Record<string, CandleData[]> = {};
+  for (const [int, candles] of intervals.entries()) {
+    result[int] = candles;
+  }
+  return result;
 }
 
 // ── Ollama Client (inline, no dep) ────────────────────────────────────────────
@@ -130,20 +153,33 @@ async function ollamaGenerate(prompt: string, system: string): Promise<string | 
 
 // ── Prompt Builder ────────────────────────────────────────────────────────────
 
-function buildPrompt(state: CachedSymbolState, interval: string): string {
-  const { tick: t, derived: d, candles: c, symbol } = state;
-  const last5 = c.slice(-5);
-  const candleStr = last5.length > 0
-    ? last5.map((x) =>
-        `  [${new Date(x.openTime).toISOString().slice(11, 16)}] O:${x.open} H:${x.high} L:${x.low} C:${x.close} V:${x.volume}`,
-      ).join('\n')
-    : '  (no candle history)';
+function buildPrompt(state: CachedSymbolState, activeInterval: string, mtf: Record<string, CandleData[]>): string {
+  const { tick: t, derived: d, symbol } = state;
+
+  const mtfStrings: string[] = [];
+  // Sort intervals: 1m, 3m, 5m, 15m, 1h
+  const order = ['1m', '3m', '5m', '15m', '1h'];
+  const sortedIntervals = Object.keys(mtf).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+
+  for (const interval of sortedIntervals) {
+    const candles = mtf[interval]!;
+    if (candles.length === 0) continue;
+    const last3 = candles.slice(-3);
+    const candleStr = last3.map((x) =>
+      `[${new Date(x.openTime).toISOString().slice(11, 16)}] O:${x.open} H:${x.high} L:${x.low} C:${x.close}`
+    ).join(', ');
+    mtfStrings.push(`${interval}: ${candleStr}`);
+  }
+
+  const mtfSection = mtfStrings.length > 0
+    ? `MULTI-TIMEFRAME DATA\n  ${mtfStrings.join('\n  ')}`
+    : '(no candle history available)';
 
   const change = t.dayOpen > 0 ? (((t.ltp - t.dayOpen) / t.dayOpen) * 100).toFixed(2) : '?';
   const vwapPct = (d.vwapDeviation * 100).toFixed(2);
   const imbalPct = (d.depthImbalance * 100).toFixed(1);
 
-  return `Symbol: ${symbol} | Interval: ${interval} | Time: ${new Date(state.ts).toISOString()}
+  return `Symbol: ${symbol} | Active Interval: ${activeInterval} | Time: ${new Date(state.ts).toISOString()}
 
 MARKET SNAPSHOT
   LTP: ${t.ltp}  |  ATP (VWAP): ${t.atp}  |  Day: ${t.dayOpen} → ${t.dayHigh}/${t.dayLow} (${change}%)
@@ -152,13 +188,12 @@ MARKET SNAPSHOT
   VWAP deviation: ${vwapPct}%  |  Depth imbalance: ${imbalPct}%
   Toxicity: ${d.toxicity.toFixed(2)}  |  Vol regime: ${d.volatilityRegime}  |  Trade intensity: ${d.tradeIntensity.toFixed(1)} t/s
 
-LAST 5 CANDLES
-${candleStr}
+${mtfSection}
 
 Write a structured market brief in 4 sections. Use plain English, NO markdown headers, no asterisks, no bullet symbols.
 
-1. BIAS: One word (Bullish/Bearish/Neutral) and confidence 0-100%. One sentence rationale.
-2. STRUCTURE: 2-3 sentences on price structure, key levels, and VWAP position.
+1. BIAS: One word (Bullish/Bearish/Neutral) and confidence 0-100%. One sentence rationale incorporating multi-timeframe confluence.
+2. STRUCTURE: 2-3 sentences on price structure across timeframes, key levels, and VWAP position.
 3. ORDER FLOW: 2-3 sentences on CVD, OI, depth imbalance, and what institutional money appears to be doing.
 4. WATCH: 1-2 specific price levels or events to monitor in the next session.
 
@@ -286,7 +321,8 @@ export async function handleBriefRequest(req: IncomingMessage, res: ServerRespon
   let result: BriefResult;
 
   if (ollamaAvailable() && state) {
-    const prompt = buildPrompt(state, interval);
+    const mtf = getMultiTimeframeCandles(provider, symbol);
+    const prompt = buildPrompt(state, interval, mtf);
     const system = `You are a senior Indian equity and F&O prop desk analyst. Write concise institutional-quality market analysis. Be direct, use numbers, avoid filler words. Never give explicit buy/sell recommendations — frame everything as observations and probabilities.`;
     try {
       const raw = await ollamaGenerate(prompt, system);

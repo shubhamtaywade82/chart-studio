@@ -42,15 +42,19 @@ const main = async (): Promise<void> => {
       if (topic.endsWith('.1m') || topic.match(/\.(candle|1m|3m|5m|15m|1h)$/)) {
         const env = JSON.parse(raw) as DataEnvelope;
         if (env.kind !== 'update' || !env.data) return;
-        const c = env.data as Record<string, unknown>;
-        if (typeof c['openTime'] === 'number') {
-          cacheCandle(env.provider, env.symbol, c as unknown as Parameters<typeof cacheCandle>[2]);
+
+        const interval = env.key || '1m';
+        const data = env.data as Record<string, any>;
+        const candle = data.candle || data;
+
+        if (typeof candle['openTime'] === 'number') {
+          cacheCandle(env.provider, env.symbol, interval, candle as any);
         }
         // batch snapshot (array)
         if (Array.isArray(env.data)) {
-          for (const candle of env.data as Array<Record<string, unknown>>) {
-            if (typeof candle['openTime'] === 'number') {
-              cacheCandle(env.provider, env.symbol, candle as unknown as Parameters<typeof cacheCandle>[2]);
+          for (const c of env.data) {
+            if (typeof c['openTime'] === 'number') {
+              cacheCandle(env.provider, env.symbol, interval, c as any);
             }
           }
         }
