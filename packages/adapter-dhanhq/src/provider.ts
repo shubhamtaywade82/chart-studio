@@ -155,8 +155,8 @@ export class DhanProvider implements MarketDataProvider {
       (tick: DhanTick) => {
         if (!tick.bids || !tick.asks) return; // only Full packets carry depth
         counter += 1;
-        const bids = tick.bids.filter(([p]) => Number.isFinite(p) && p > 0);
-        const asks = tick.asks.filter(([p]) => Number.isFinite(p) && p > 0);
+        const bids = tick.bids.filter(([p]) => Number.isFinite(p) && p > 0).map(([p, q]) => [p, q] as [number, number]);
+        const asks = tick.asks.filter(([p]) => Number.isFinite(p) && p > 0).map(([p, q]) => [p, q] as [number, number]);
         onDelta({
           firstUpdateId: counter,
           finalUpdateId: counter,
@@ -204,6 +204,56 @@ export class DhanProvider implements MarketDataProvider {
           bestAskPrice: ask[0],
           bestAskQty: ask[1],
           ts: tick.ts,
+        });
+      },
+    );
+  }
+
+  streamAnalytics(
+    symbol: string,
+    onData: (data: {
+      ltp: number; atp: number; ltq: number; ltt: number;
+      volume: number; totalBuyQty: number; totalSellQty: number;
+      oi: number | undefined; highOi: number | undefined; lowOi: number | undefined;
+      dayOpen: number; dayHigh: number; dayLow: number; dayClose: number;
+      bidOrders: number[] | undefined; askOrders: number[] | undefined;
+      prevClose: number | undefined; prevOi: number | undefined;
+    }) => void,
+  ): Unsub {
+    const ins = findInstrument(symbol);
+    if (!ins) return () => undefined;
+    let state = { dayOpen: 0, dayHigh: 0, dayLow: 0, dayClose: 0, prevClose: 0, prevOi: 0 };
+    return this.pool.subscribe(
+      { exchangeSegment: ins.exchangeSegment, securityId: ins.securityId },
+      (tick: DhanTick) => {
+        if (typeof tick.ltp !== 'number') return;
+        // Update day OHLC from packet (fresh from Dhan)
+        if (typeof tick.open === 'number') state.dayOpen = tick.open;
+        if (typeof tick.high === 'number') state.dayHigh = tick.high;
+        if (typeof tick.low === 'number') state.dayLow = tick.low;
+        if (typeof tick.close === 'number') state.dayClose = tick.close;
+        if (typeof tick.prevClose === 'number') state.prevClose = tick.prevClose;
+        if (typeof tick.prevOi === 'number') state.prevOi = tick.prevOi;
+
+        onData({
+          ltp: tick.ltp,
+          atp: tick.atp ?? 0,
+          ltq: tick.ltq ?? 0,
+          ltt: tick.ltt ?? 0,
+          volume: tick.volume ?? 0,
+          totalBuyQty: tick.totalBuyQty ?? 0,
+          totalSellQty: tick.totalSellQty ?? 0,
+          oi: tick.openInterest,
+          highOi: tick.highOi,
+          lowOi: tick.lowOi,
+          dayOpen: state.dayOpen,
+          dayHigh: state.dayHigh,
+          dayLow: state.dayLow,
+          dayClose: state.dayClose,
+          bidOrders: tick.bidOrders,
+          askOrders: tick.askOrders,
+          prevClose: state.prevClose,
+          prevOi: state.prevOi,
         });
       },
     );

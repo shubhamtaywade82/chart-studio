@@ -20,6 +20,9 @@ import { LtpPrimitive } from './chart/ltp-primitive';
 import { SmoothPriceAnimator } from './chart/smooth-price';
 import { ema, sma, macd, rsi, bollinger } from './indicators/math';
 import type { ActiveIndicator } from './indicators/registry';
+import { AnalyticsRenderer, type AnalyticsState } from './chart/analytics';
+import { AlertSystem } from './chart/alerts';
+import { LatencyMonitor, DepthHeatmap, VolumeProfilePanel } from './chart/market-monitor';
 
 export class ChartView {
   private chart: IChartApi;
@@ -36,6 +39,12 @@ export class ChartView {
   private intervalMs = 0;
   private watermark: ITextWatermarkPluginApi<Time> | null = null;
   private indicatorSeries = new Map<string, Array<ISeriesApi<'Line'> | ISeriesApi<'Histogram'>>>();
+  private analytics: AnalyticsRenderer | null = null;
+  private alertSystem: AlertSystem;
+  private latencyMonitor: LatencyMonitor;
+  private depthHeatmap: DepthHeatmap;
+  private volumeProfile: VolumeProfilePanel;
+  private alertListeners = new Set<(alerts: any[]) => void>();
 
   constructor(container: HTMLElement) {
     this.chart = createChart(container, {
@@ -120,6 +129,18 @@ export class ChartView {
     this.chart.subscribeClick((p) => this.handleClick(p));
     this.chart.subscribeCrosshairMove((p) => this.handleCrosshair(p));
     this.chart.timeScale().subscribeVisibleLogicalRangeChange((r) => this.handleRangeChange(r));
+
+    this.analytics = new AnalyticsRenderer(this.chart, this.series);
+    this.analytics.setupSeries();
+
+    this.alertSystem = new AlertSystem();
+    this.alertSystem.onAlertsChange((alerts) => {
+      for (const fn of this.alertListeners) fn(alerts);
+    });
+
+    this.latencyMonitor = new LatencyMonitor();
+    this.depthHeatmap = new DepthHeatmap();
+    this.volumeProfile = new VolumeProfilePanel();
   }
 
   setSymbol(symbol: string): void {
@@ -235,6 +256,81 @@ export class ChartView {
   }
 
   // ── Indicators ──────────────────────────────────────────────────────
+
+  updateAnalytics(data: {
+    ltp: number; atp: number; ltq: number; ltt: number;
+    volume: number; totalBuyQty: number; totalSellQty: number;
+    oi: number | undefined; highOi: number | undefined; lowOi: number | undefined;
+    dayOpen: number; dayHigh: number; dayLow: number; dayClose: number;
+    bidOrders: number[] | undefined; askOrders: number[] | undefined;
+    prevClose: number | undefined; prevOi: number | undefined;
+  }): void {
+    if (!this.analytics) return;
+    const last = this.candles[this.candles.length - 1];
+    if (!last) return;
+
+    const state: AnalyticsState = {
+      ltp: data.ltp,
+      atp: data.atp,
+      volume: data.volume,
+      totalBuyQty: data.totalBuyQty,
+      totalSellQty: data.totalSellQty,
+      oi: data.oi,
+      highOi: data.highOi,
+      lowOi: data.lowOi,
+      dayOpen: data.dayOpen,
+      dayHigh: data.dayHigh,
+      dayLow: data.dayLow,
+      dayClose: data.dayClose,
+      prevClose: data.prevClose,
+      prevOi: data.prevOi,
+      bidOrders: data.bidOrders,
+      askOrders: data.askOrders,
+      ltq: data.ltq,
+      ltt: data.ltt,
+      time: (last.openTime / 1000) as UTCTimestamp,
+    };
+
+    this.analytics.update(state);
+    this.depthHeatmap.update(data.bidOrders, data.askOrders);
+    this.volumeProfile.update(data.ltp, 1 / Math.pow(10, this.getPrecision()), data.ltq);
+
+    // Latency monitoring
+    if (data.ltt > 0) {
+      this.latencyMonitor.recordTick(data.ltt);
+    }
+
+    // Alert checking
+    const expectedVolume = (data.volume / (Date.now() / 1000 - (last.openTime / 1000))) * 86400;
+    this.alertSystem.check({
+      ltp: data.ltp,
+      atp: data.atp,
+      oi: data.oi,
+      dayHigh: data.dayHigh,
+      dayLow: data.dayLow,
+      volume: data.volume,
+      totalBuyQty: data.totalBuyQty,
+      totalSellQty: data.totalSellQty,
+      bidOrders: data.bidOrders,
+      askOrders: data.askOrders,
+      ltt: data.ltt,
+      ltq: data.ltq,
+      expectedVolume,
+    });
+  }
+
+  onAlertsChange(fn: (alerts: any[]) => void): () => void {
+    this.alertListeners.add(fn);
+    return () => this.alertListeners.delete(fn);
+  }
+
+  getLatencyStats() {
+    return this.latencyMonitor.getStats();
+  }
+
+  renderVolumeProfile(): void {
+    this.volumeProfile.render();
+  }
 
   setIndicators(list: ActiveIndicator[]): void {
     for (const seriesList of this.indicatorSeries.values()) {
@@ -425,6 +521,8 @@ export class ChartView {
   dispose(): void {
     this.ltpAnimator.flush();
     this.resizeObs.disconnect();
+    this.depthHeatmap.dispose();
+    this.volumeProfile.dispose();
     this.chart.remove();
   }
 }

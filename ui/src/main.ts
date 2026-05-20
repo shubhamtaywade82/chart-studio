@@ -286,6 +286,10 @@ const main = (): void => {
       if (tapeSellsEl) tapeSellsEl.textContent = String(tapeSells);
     }));
     unsubs.push(client.streamBookTicker(state.provider, state.symbol, (bt) => updateHeaderTicker(bt.bestBidPrice, bt.bestAskPrice)));
+    unsubs.push(client.streamAnalytics(state.provider, state.symbol, (data) => {
+      chart.updateAnalytics(data);
+      chart.renderVolumeProfile();
+    }));
   };
 
   // Header ticker (BID/ASK/SPREAD/price)

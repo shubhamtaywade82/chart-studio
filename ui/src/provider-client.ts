@@ -21,10 +21,19 @@ export interface OrderBookSnapshot {
 export interface Trade { price: number; qty: number; ts: number; makerSide: boolean; tradeId?: number }
 export interface BookTicker { bestBidPrice: number; bestBidQty: number; bestAskPrice: number; bestAskQty: number; ts: number }
 
+export interface AnalyticsData {
+  ltp: number; atp: number; ltq: number; ltt: number;
+  volume: number; totalBuyQty: number; totalSellQty: number;
+  oi: number | undefined; highOi: number | undefined; lowOi: number | undefined;
+  dayOpen: number; dayHigh: number; dayLow: number; dayClose: number;
+  bidOrders: number[] | undefined; askOrders: number[] | undefined;
+  prevClose: number | undefined; prevOi: number | undefined;
+}
+
 export interface ProviderInfo { provider: string; displayName: string; online: boolean; lastSeen: number }
 export interface SymbolRef { provider: string; symbol: string; label?: string; segment?: string }
 
-export type Channel = 'candle' | 'depth' | 'trade' | 'ticker';
+export type Channel = 'candle' | 'depth' | 'trade' | 'ticker' | 'analytics';
 
 type FrameKind = 'snapshot' | 'update' | 'error';
 
@@ -137,6 +146,10 @@ export class ProviderClient {
 
   streamBookTicker(provider: string, symbol: string, onTicker: (t: BookTicker) => void): () => void {
     return this.subscribe<unknown, BookTicker>({ provider, symbol, channel: 'ticker' }, () => undefined, onTicker);
+  }
+
+  streamAnalytics(provider: string, symbol: string, onData: (data: AnalyticsData) => void): () => void {
+    return this.subscribe<unknown, AnalyticsData>({ provider, symbol, channel: 'analytics' }, () => undefined, onData);
   }
 
   async listProviders(): Promise<ProviderInfo[]> {

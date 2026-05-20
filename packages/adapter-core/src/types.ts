@@ -88,7 +88,7 @@ export const InstrumentMetaSchema = SymbolRefSchema.extend({
 export type InstrumentMeta = z.infer<typeof InstrumentMetaSchema>;
 
 /** Channels a client can subscribe to via the gateway. */
-export type Channel = 'candle' | 'depth' | 'trade' | 'ticker';
+export type Channel = 'candle' | 'depth' | 'trade' | 'ticker' | 'analytics';
 
 /** Envelope published on data topics. */
 export interface DataEnvelope<T = unknown> {

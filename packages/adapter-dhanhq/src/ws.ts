@@ -51,9 +51,19 @@ export interface DhanTick {
   high?: number;
   low?: number;
   openInterest?: number;
-  /** 5-level top-of-book; price, qty per side. */
-  bids?: Array<[number, number]>;
-  asks?: Array<[number, number]>;
+  highOi?: number;
+  lowOi?: number;
+  /** 5-level depth with [price, qty, orders] per side. */
+  bids?: Array<[number, number, number]>;
+  asks?: Array<[number, number, number]>;
+  /** Order count per bid level */
+  bidOrders?: number[];
+  /** Order count per ask level */
+  askOrders?: number[];
+  /** Prev close (from code 6) */
+  prevClose?: number;
+  /** Prev OI (from code 6) */
+  prevOi?: number;
 }
 
 export interface DhanSubscription {
@@ -99,8 +109,8 @@ const parseTick = (buf: Buffer): DhanTick | null => {
     return t;
   }
   if (code === 6 && buf.length >= 16) {
-    t.close = buf.readFloatLE(8);
-    t.openInterest = buf.readInt32LE(12);
+    t.prevClose = buf.readFloatLE(8);
+    t.prevOi = buf.readInt32LE(12);
     return t;
   }
   if (code === 8 && buf.length >= 162) {
@@ -112,26 +122,34 @@ const parseTick = (buf: Buffer): DhanTick | null => {
     t.totalSellQty = buf.readInt32LE(26);
     t.totalBuyQty = buf.readInt32LE(30);
     t.openInterest = buf.readInt32LE(34);
-    // 38: HighOi (i32), 42: LowOi (i32)
+    t.highOi = buf.readInt32LE(38);
+    t.lowOi = buf.readInt32LE(42);
     t.open = buf.readFloatLE(46);
     t.close = buf.readFloatLE(50);
     t.high = buf.readFloatLE(54);
     t.low = buf.readFloatLE(58);
-    const bids: Array<[number, number]> = [];
-    const asks: Array<[number, number]> = [];
+    const bids: Array<[number, number, number]> = [];
+    const asks: Array<[number, number, number]> = [];
+    const bidOrders: number[] = [];
+    const askOrders: number[] = [];
     let off = 62;
     for (let i = 0; i < 5; i += 1) {
       const bidQty = buf.readInt32LE(off);
       const askQty = buf.readInt32LE(off + 4);
-      // skip orders (i16 + i16) at off+8 / off+10
+      const bidOrd = buf.readInt16LE(off + 8);
+      const askOrd = buf.readInt16LE(off + 10);
       const bidPx = buf.readFloatLE(off + 12);
       const askPx = buf.readFloatLE(off + 16);
-      bids.push([bidPx, bidQty]);
-      asks.push([askPx, askQty]);
+      bids.push([bidPx, bidQty, bidOrd]);
+      asks.push([askPx, askQty, askOrd]);
+      bidOrders.push(bidOrd);
+      askOrders.push(askOrd);
       off += 20;
     }
     t.bids = bids;
     t.asks = asks;
+    t.bidOrders = bidOrders;
+    t.askOrders = askOrders;
     return t;
   }
   return null;

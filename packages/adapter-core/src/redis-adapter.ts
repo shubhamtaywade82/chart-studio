@@ -161,6 +161,9 @@ export class RedisAdapter {
       case 'ticker':
         unsub = this.provider.streamBookTicker(msg.symbol, (t) => publish(t));
         break;
+      case 'analytics':
+        unsub = (this.provider as any).streamAnalytics?.(msg.symbol, (d: unknown) => publish(d)) ?? (() => undefined);
+        break;
     }
     return { unsub, refs: 1 };
   }
@@ -177,6 +180,7 @@ export class RedisAdapter {
           break;
         case 'trade':
         case 'ticker':
+        case 'analytics':
           // No REST snapshot — only live ticks.
           return;
       }
