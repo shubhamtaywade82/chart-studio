@@ -46,6 +46,16 @@ export class OrderBookPanel {
     this.render();
   }
 
+  getSnapshot(): { bids: Array<[number, number]>; asks: Array<[number, number]> } {
+    const bids: Array<[number, number]> = [];
+    const asks: Array<[number, number]> = [];
+    for (const [p, q] of this.bids) bids.push([p, q]);
+    for (const [p, q] of this.asks) asks.push([p, q]);
+    bids.sort((a, b) => b[0] - a[0]);
+    asks.sort((a, b) => a[0] - b[0]);
+    return { bids, asks };
+  }
+
   private topLevels(map: Map<number, number>, n: number, cmp: (a: Level, b: Level) => number): Level[] {
     const arr: Level[] = [];
     for (const [price, qty] of map) arr.push({ price, qty });

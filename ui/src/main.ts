@@ -3,6 +3,7 @@ import { ProviderClient, type Candle, type SymbolRef } from './provider-client';
 import { OrderBookPanel } from './panels/orderbook';
 import { TradeTapePanel } from './panels/trade-tape';
 import { SentimentPanel } from './panels/sentiment';
+import { MicrostructurePanel } from './panels/microstructure';
 import { GlobalSearch } from './search/global-search';
 import { ProviderSettings } from './settings/providers';
 import { WatchlistPanel } from './watchlist/watchlist';
@@ -12,6 +13,8 @@ import { AlertsPanel } from './alerts/panel';
 import { ScriptManager } from './scripts/editor';
 import { DrawingLayer, type DrawingTool } from './drawings/drawings';
 import { INDICATORS, type ActiveIndicator } from './indicators/registry';
+import { AIBriefPanel } from './panels/ai-brief';
+import { StrategySignalsPanel } from './panels/strategy-signals';
 
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
@@ -64,12 +67,15 @@ const main = (): void => {
   const ob = new OrderBookPanel(obRoot, obSpread);
   const tape = new TradeTapePanel(tapeRoot);
   const sentiment = new SentimentPanel(sentimentRoot);
+  const microstructure = new MicrostructurePanel();
   const settings = new ProviderSettings(client);
   const watchlist = new WatchlistPanel(watchlistRoot, client);
   const indicatorPicker = new IndicatorPicker();
   const alertEngine = new AlertEngine(client);
   const scriptManager = new ScriptManager(chart, client);
   const drawings = new DrawingLayer(chart, chartContainer);
+  const aiBrief = new AIBriefPanel();
+  const strategySignals = new StrategySignalsPanel(client);
 
   let activeState: AppState | null = parseHash();
   let currentCandles: Candle[] = [];
@@ -229,7 +235,11 @@ const main = (): void => {
   };
 
   const tearDown = (): void => {
-    for (const u of unsubs) try { u(); } catch { /* noop */ }
+    for (const fn of unsubs) try { fn(); } catch { /* noop */ }
+    sentiment.reset();
+    microstructure.reset();
+    tape.reset();
+    ob.reset(null);
     unsubs.length = 0;
   };
 
@@ -280,6 +290,8 @@ const main = (): void => {
     watchlist.setActive(state.provider, state.symbol);
     drawings.setSymbol(state.provider, state.symbol);
     renderIntervals();
+    aiBrief.refresh(state.provider, state.symbol, state.interval);
+    strategySignals.bind(state.provider, state.symbol, state.interval);
     tearDown();
     ob.reset({ lastUpdateId: 0, bids: [], asks: [], ts: 0 });
     tape.reset();
@@ -291,6 +303,22 @@ const main = (): void => {
     chart.clearLastTradePrice();
     lastPrice = null;
     scriptManager.setCandles([]);
+
+    chart.setLoadOlderCallback(async (oldestOpenTime: number) => {
+      try {
+        const params = new URLSearchParams({
+          provider: state.provider, symbol: state.symbol, interval: state.interval,
+          endTime: String(oldestOpenTime - 1), limit: '500',
+        });
+        const res = await fetch(`/api/candles/history?${params.toString()}`);
+        if (!res.ok) return;
+        const older = await res.json() as Candle[];
+        if (!Array.isArray(older) || older.length === 0) return;
+        chart.prependHistory(older);
+        currentCandles = [...older, ...currentCandles].sort((a, b) => a.openTime - b.openTime);
+        scriptManager.setCandles(currentCandles);
+      } catch { /* swallow */ }
+    });
 
     unsubs.push(client.streamCandles(
       state.provider, state.symbol, state.interval,
@@ -311,18 +339,31 @@ const main = (): void => {
     ));
     unsubs.push(client.streamDepth(
       state.provider, state.symbol,
-      (snap) => ob.reset(snap),
-      (delta) => ob.applyDelta(delta),
+      (snap) => {
+        ob.reset(snap);
+        if (snap) {
+          microstructure.updateDepth(snap.bids ?? [], snap.asks ?? []);
+        }
+      },
+      (delta) => {
+        ob.applyDelta(delta);
+        const fullSnap = ob.getSnapshot();
+        microstructure.updateDepth(fullSnap.bids, fullSnap.asks);
+      },
     ));
     unsubs.push(client.streamTrades(state.provider, state.symbol, (t) => {
       updateHeaderPrice(t.price);
       tape.push(t);
       sentiment.push(t);
+      microstructure.pushTrade(t);
       chart.setLastTradePrice(t.price, t.ts, t.qty);
+      chart.updateVolumeProfile(t.price, t.qty);
+      chart.renderVolumeProfile();
       if (t.makerSide) tapeSells += 1; else tapeBuys += 1;
       if (tapeBuysEl) tapeBuysEl.textContent = String(tapeBuys);
       if (tapeSellsEl) tapeSellsEl.textContent = String(tapeSells);
     }));
+
     unsubs.push(client.streamBookTicker(state.provider, state.symbol, (bt) => updateHeaderTicker(bt.bestBidPrice, bt.bestAskPrice)));
     unsubs.push(client.streamAnalytics(state.provider, state.symbol, (data) => {
       chart.updateAnalytics(data);
@@ -335,6 +376,12 @@ const main = (): void => {
     }));
     unsubs.push(client.streamAIAnnotation(state.provider, state.symbol, (ann) => {
       chart.applyAIAnnotation(ann);
+      if (ann.kind === 'reflex') {
+        const data = ann.data as { derived?: { volatilityRegime?: string; toxicity?: number } };
+        const reg = data.derived?.volatilityRegime;
+        const tox = data.derived?.toxicity;
+        microstructure.updateAI(reg, tox);
+      }
     }));
   };
 

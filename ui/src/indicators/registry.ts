@@ -24,6 +24,7 @@ export const INDICATORS: IndicatorDef[] = [
   { id: 'BOLL', label: 'Bollinger Bands',        onMain: true,  defaults: [20, 2], paramLabels: ['period', 'mult'] },
   { id: 'BBI',  label: 'Bull-Bear Index',        onMain: true,  defaults: [3, 6, 12, 24], paramLabels: ['p1', 'p2', 'p3', 'p4'] },
   { id: 'SAR',  label: 'Parabolic SAR',          onMain: true,  defaults: [2, 2, 20], paramLabels: ['start', 'step', 'max'] },
+  { id: 'SMC',  label: 'Smart Money Concepts',   onMain: true,  defaults: [5], paramLabels: ['period'] },
   // Sub-panes
   { id: 'CVD',  label: 'Cumulative Volume Delta', onMain: false, defaults: [], paramLabels: [] },
   { id: 'OI',   label: 'Open Interest Change',    onMain: false, defaults: [], paramLabels: [] },

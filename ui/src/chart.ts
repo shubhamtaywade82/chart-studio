@@ -20,6 +20,7 @@ import { LtpPrimitive } from './chart/ltp-primitive';
 import { SmoothPriceAnimator } from './chart/smooth-price';
 import { ema, sma, macd, rsi, bollinger } from './indicators/math';
 import type { ActiveIndicator } from './indicators/registry';
+import { SmcPrimitive } from './chart/smc-primitive';
 import { AnalyticsRenderer, type AnalyticsState } from './chart/analytics';
 import { AlertSystem } from './chart/alerts';
 import { LatencyMonitor, DepthHeatmap, VolumeProfilePanel } from './chart/market-monitor';
@@ -46,6 +47,7 @@ export class ChartView {
   private intervalMs = 0;
   private watermark: ITextWatermarkPluginApi<Time> | null = null;
   private indicatorSeries = new Map<string, Array<ISeriesApi<'Line'> | ISeriesApi<'Histogram'>>>();
+  private smcPrimitives = new Set<SmcPrimitive>();
   private analytics: AnalyticsRenderer | null = null;
   private alertSystem: AlertSystem;
   private latencyMonitor: LatencyMonitor;
@@ -286,16 +288,44 @@ export class ChartView {
     this.series.setData(cs);
     this.volume.setData(vs);
 
+    // New symbol can have a wildly different price magnitude (BTC ~$77k vs
+    // XRP ~$1.3). Force the price scale to re-auto-fit instead of inheriting
+    // the previous symbol's range.
+    this.chart.priceScale('right').applyOptions({ autoScale: true });
+    this.chart.timeScale().fitContent();
+
     const last = this.candles[this.candles.length - 1];
     if (last) this.setLastTradePrice(last.close);
+
+    for (const smc of this.smcPrimitives) {
+      smc.setCandles(this.candles);
+    }
+  }
+
+  private updateCandleState(c: Candle): void {
+    const last = this.candles[this.candles.length - 1];
+    if (last && last.openTime === c.openTime) {
+      this.candles[this.candles.length - 1] = c;
+    } else if (!last || c.openTime > last.openTime) {
+      this.candles.push(c);
+    } else {
+      // Out of order update: find and replace or insert
+      const idx = this.candles.findIndex((x) => x.openTime === c.openTime);
+      if (idx >= 0) {
+        this.candles[idx] = c;
+      } else {
+        this.candles.push(c);
+        this.candles.sort((a, b) => a.openTime - b.openTime);
+      }
+    }
   }
 
   updateCandle(c: Candle): void {
-    this.ltpAnimator.flush();
     const t = Math.floor(c.openTime / 1000) as UTCTimestamp;
+    const isNewBar = !this.lastUpdatedTime || t > this.lastUpdatedTime;
 
-    // Guard against updating older candles for series data only.
-    if (this.lastUpdatedTime === null || t >= this.lastUpdatedTime) {
+    if (isNewBar) {
+      this.ltpAnimator.flush();
       try {
         this.series.update({ time: t, open: c.open, high: c.high, low: c.low, close: c.close });
         this.volume.update({
@@ -305,19 +335,24 @@ export class ChartView {
         });
         this.lastUpdatedTime = t;
       } catch (e) {
-        console.warn('[chart] failed to update candle in series', e);
+        console.warn('[chart] failed to update new bar', e);
       }
     }
 
+    this.updateCandleState(c);
+
+    // If it's the current (latest) bar, drive visual smoothness via animator.
+    // Otherwise, it was a historical update; we already called series.update if needed.
     const last = this.candles[this.candles.length - 1];
-    if (last && last.openTime === c.openTime) {
-      this.candles[this.candles.length - 1] = c;
-    } else if (!last || c.openTime > last.openTime) {
-      this.candles.push(c);
+    if (last && c.openTime === last.openTime) {
+      this.ltpAnimator.snapTo(c.close);
+      // Force an update to draw any new high/low/volume updates immediately.
+      this.onSmoothPriceUpdate(this.ltpAnimator.getPrice() || c.close);
     }
 
-    // Always update visual LTP line regardless of series time guard.
-    this.ltpAnimator.snapTo(c.close);
+    for (const smc of this.smcPrimitives) {
+      smc.setCandles(this.candles);
+    }
   }
 
   setLastTradePrice(price: number, timestampMs?: number, qty?: number): void {
@@ -332,7 +367,7 @@ export class ChartView {
       const newCandle: Candle = { openTime: newOpenTime, open: price, high: price, low: price, close: price, volume: qty ?? 0 };
       const t = Math.floor(newOpenTime / 1000) as UTCTimestamp;
 
-      if (this.lastUpdatedTime === null || t >= this.lastUpdatedTime) {
+      if (!this.lastUpdatedTime || t >= this.lastUpdatedTime) {
         try {
           this.series.update({ time: t, open: price, high: price, low: price, close: price });
           this.volume.update({
@@ -340,53 +375,37 @@ export class ChartView {
             value: newCandle.volume,
             color: 'rgba(255, 255, 255, 0.18)',
           });
-          this.candles.push(newCandle);
           this.lastUpdatedTime = t;
         } catch (e) {
-          console.warn('[chart] failed to update series on rollover', e);
-        }
-      } else {
-        // Find if we already have this candle (unlikely but possible with jitter)
-        const existingIdx = this.candles.findIndex(c => c.openTime === newOpenTime);
-        if (existingIdx >= 0) {
-          const c = this.candles[existingIdx]!;
-          this.candles[existingIdx] = { ...c, high: Math.max(c.high, price), low: Math.min(c.low, price), close: price, volume: c.volume + (qty ?? 0) };
-        } else {
-          this.candles.push(newCandle);
-          this.candles.sort((a, b) => a.openTime - b.openTime);
+          console.warn('[chart] failed to start new bar on rollover', e);
         }
       }
+      this.updateCandleState(newCandle);
       this.ltpAnimator.snapTo(price);
       return;
     }
 
-    // Update real candle data immediately; the animator drives visual updates.
+    // Update internal candle data immediately.
     if (last) {
-      // Find the correct candle to update based on currentTime
       const candleOpenTime = this.intervalMs > 0 ? Math.floor(currentTime / this.intervalMs) * this.intervalMs : last.openTime;
-      const targetIdx = this.candles.findIndex(c => c.openTime === candleOpenTime);
-      
-      if (targetIdx >= 0) {
-        const c = this.candles[targetIdx]!;
-        this.candles[targetIdx] = {
-          ...c,
-          high: Math.max(c.high, price),
-          low: Math.min(c.low, price),
+      if (candleOpenTime === last.openTime) {
+        this.candles[this.candles.length - 1] = {
+          ...last,
+          high: Math.max(last.high, price),
+          low: Math.min(last.low, price),
           close: price,
-          volume: c.volume + (qty ?? 0),
+          volume: last.volume + (qty ?? 0),
         };
       } else if (currentTime > last.openTime) {
-        // It's a new candle but rollover check above didn't catch it (maybe intervalMs is 0)
         const newCandle: Candle = { openTime: candleOpenTime, open: price, high: price, low: price, close: price, volume: qty ?? 0 };
-        this.candles.push(newCandle);
+        this.updateCandleState(newCandle);
       }
     } else {
-      // If no candles exist yet (race between trades and history), bootstrap one
+      // Bootstrap first candle
       const openTime = this.intervalMs > 0 ? Math.floor(currentTime / this.intervalMs) * this.intervalMs : currentTime;
       const newCandle: Candle = { openTime, open: price, high: price, low: price, close: price, volume: qty ?? 0 };
       const t = Math.floor(openTime / 1000) as UTCTimestamp;
-
-      if (this.lastUpdatedTime === null || t >= this.lastUpdatedTime) {
+      if (!this.lastUpdatedTime || t >= this.lastUpdatedTime) {
         try {
           this.series.update({ time: t, open: price, high: price, low: price, close: price });
           this.volume.update({
@@ -394,17 +413,15 @@ export class ChartView {
             value: newCandle.volume,
             color: 'rgba(255, 255, 255, 0.18)',
           });
-          this.candles.push(newCandle);
           this.lastUpdatedTime = t;
         } catch (e) {
-          console.warn('[chart] failed to update series on bootstrap', e);
+          console.warn('[chart] failed to bootstrap series', e);
         }
-      } else {
-        this.candles.push(newCandle);
-        this.candles.sort((a, b) => a.openTime - b.openTime);
       }
+      this.updateCandleState(newCandle);
     }
 
+    // drive visual smoothness via animator.
     this.ltpAnimator.snapTo(price);
   }
 
@@ -421,22 +438,22 @@ export class ChartView {
     }
 
     try {
-      // Use real high/low; only close is animated for visual smoothness.
+      // Visual only update; does not advance lastUpdatedTime so subsequent frames
+      // for the same bar can continue to update it.
       this.series.update({ time: t, open: last.open, high: last.high, low: last.low, close: animatedPrice });
 
-      // Update volume series as well to keep it in sync
       this.volume.update({
         time: t,
         value: last.volume,
-        color: animatedPrice >= last.open ? 'rgba(46, 189, 133, 0.35)' : 'rgba(246, 70, 93, 0.35)',
+        color: animatedPrice >= last.open ? 'rgba(46, 189, 133, 0.6)' : 'rgba(246, 70, 93, 0.6)',
       });
-      this.lastUpdatedTime = t;
     } catch (e) {
-      console.warn('[chart] failed to update series in animation loop', e);
+      console.warn('[chart] animation update skipped', e);
     }
 
     const color = animatedPrice >= last.open ? '#2ebd85' : '#f6465d';
     this.ltp.setLtp(animatedPrice, color, t);
+    if (this.intervalMs > 0) this.ltp.setBarTiming(this.intervalMs, last.openTime);
   }
 
   clearLastTradePrice(): void {
@@ -494,7 +511,7 @@ export class ChartView {
 
     this.analytics.update(state);
     this.depthHeatmap.update(data.depthBids, data.depthAsks);
-    this.volumeProfile.update(data.ltp, 1 / Math.pow(10, this.getPrecision()), data.ltq);
+    this.updateVolumeProfile(data.ltp, data.ltq);
 
     if (data.ltt > 0) this.latencyMonitor.recordTick(data.ltt);
 
@@ -535,6 +552,12 @@ export class ChartView {
     return this.latencyMonitor.getStats();
   }
 
+  updateVolumeProfile(price: number, qty: number): void {
+    const precision = this.getPrecision();
+    const tickSize = 1 / Math.pow(10, precision);
+    this.volumeProfile.update(price, tickSize, qty);
+  }
+
   renderVolumeProfile(): void {
     this.volumeProfile.render();
   }
@@ -546,6 +569,11 @@ export class ChartView {
       }
     }
     this.indicatorSeries.clear();
+
+    for (const smc of this.smcPrimitives) {
+      try { this.series.detachPrimitive(smc); } catch { /* ignore */ }
+    }
+    this.smcPrimitives.clear();
 
     // Clean up dynamic analytics sub-panes
     this.analytics?.removeCvdSeries();
@@ -660,6 +688,14 @@ export class ChartView {
           added.push(histS, macdS, sigS);
           break;
         }
+        case 'SMC': {
+          const [period = 5] = ind.params;
+          const smc = new SmcPrimitive(period);
+          smc.setCandles(this.candles);
+          this.series.attachPrimitive(smc);
+          this.smcPrimitives.add(smc);
+          break;
+        }
         default:
           break;
       }
@@ -739,6 +775,38 @@ export class ChartView {
       this.atLive = atLive;
       for (const fn of this.liveListeners) fn(atLive);
     }
+    // Lazy-load older history when the user scrolls left and we're within the
+    // first ~10 bars of the loaded window.
+    if (range.from < 10 && this.candles.length > 0 && this.onLoadOlder && !this.olderLoading) {
+      this.olderLoading = true;
+      const oldest = this.candles[0]!.openTime;
+      void this.onLoadOlder(oldest).finally(() => { this.olderLoading = false; });
+    }
+  }
+
+  private olderLoading = false;
+  private onLoadOlder: ((endTime: number) => Promise<void>) | null = null;
+  setLoadOlderCallback(fn: (endTime: number) => Promise<void>): void { this.onLoadOlder = fn; }
+
+  /** Prepend older candles without resetting visible range. */
+  prependHistory(older: Candle[]): void {
+    if (older.length === 0) return;
+    const existing = new Set(this.candles.map((c) => c.openTime));
+    const fresh = older.filter((c) => !existing.has(c.openTime));
+    if (fresh.length === 0) return;
+    this.candles = [...fresh, ...this.candles].sort((a, b) => a.openTime - b.openTime);
+    const cs = this.candles.map((c) => ({
+      time: Math.floor(c.openTime / 1000) as UTCTimestamp,
+      open: c.open, high: c.high, low: c.low, close: c.close,
+    }));
+    const vs = this.candles.map((c) => ({
+      time: Math.floor(c.openTime / 1000) as UTCTimestamp,
+      value: c.volume,
+      color: c.close >= c.open ? 'rgba(46, 189, 133, 0.35)' : 'rgba(246, 70, 93, 0.35)',
+    }));
+    this.series.setData(cs);
+    this.volume.setData(vs);
+    for (const smc of this.smcPrimitives) smc.setCandles(this.candles);
   }
 
   dispose(): void {
@@ -775,3 +843,4 @@ export interface CrosshairInfo {
   volume: number | null;
   formattedPrice: string;
 }
+

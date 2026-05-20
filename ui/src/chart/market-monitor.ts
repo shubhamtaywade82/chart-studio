@@ -179,7 +179,7 @@ interface VolBucket { qty: number; lastTs: number }
 export class VolumeProfilePanel {
   private volProfile = new Map<number, VolBucket>();
   private container: HTMLElement | null = null;
-  private readonly maxBuckets = 50;
+  private readonly maxBuckets = 400;
 
   reset(): void {
     this.volProfile.clear();

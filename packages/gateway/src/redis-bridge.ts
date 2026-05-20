@@ -44,6 +44,8 @@ export class RedisBridge {
   private readonly presence = new Map<string, ProviderPresence>();
   private readonly pendingDiscover = new Map<string, (reply: DiscoverReply) => void>();
   private readonly presenceListeners = new Set<(p: ProviderPresence[]) => void>();
+  private readonly rawListeners = new Set<(topic: string, raw: string) => void>();
+
 
   constructor(redisUrl: string) {
     this.sub = new Redis(redisUrl);
@@ -72,7 +74,7 @@ export class RedisBridge {
     this.pub.publish(ctrlTopic(provider), JSON.stringify(msg)).catch(() => {});
   }
 
-  async discover<T = unknown>(provider: string, op: 'search' | 'list' | 'meta', payload: Partial<DiscoverRequest> = {}, timeoutMs = 5000): Promise<T | null> {
+  async discover<T = unknown>(provider: string, op: 'search' | 'list' | 'meta' | 'candles', payload: Partial<DiscoverRequest> = {}, timeoutMs = 10_000): Promise<T | null> {
     const reqId = randomUUID();
     const req: DiscoverRequest = { reqId, op, ...payload };
     const replyTopic = discoverRepTopic(provider, reqId);
@@ -119,6 +121,12 @@ export class RedisBridge {
     };
   }
 
+  /** Register a listener that receives every raw Redis data message. Returns unsub function. */
+  listenRaw(listener: (topic: string, raw: string) => void): () => void {
+    this.rawListeners.add(listener);
+    return () => { this.rawListeners.delete(listener); };
+  }
+
   onPresenceChange(listener: (providers: ProviderPresence[]) => void): () => void {
     this.presenceListeners.add(listener);
     listener(this.snapshotPresence());
@@ -132,6 +140,10 @@ export class RedisBridge {
   // ── Internal routing ─────────────────────────────────────────────────
 
   private routeDataMessage(topic: string, raw: string): void {
+    // Notify raw listeners first (used by brief cache, etc.)
+    for (const fn of this.rawListeners) {
+      try { fn(topic, raw); } catch { /* ignore */ }
+    }
     const set = this.listeners.get(topic);
     if (!set || set.size === 0) return;
     let env: DataEnvelope;
