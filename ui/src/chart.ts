@@ -294,18 +294,16 @@ export class ChartView {
     this.ltpAnimator.flush();
     const t = (c.openTime / 1000) as UTCTimestamp;
 
-    // Guard against updating older candles to avoid Lightweight Charts errors
-    if (this.lastUpdatedTime !== null && t < this.lastUpdatedTime) {
-      return;
+    // Guard against updating older candles for series data only.
+    if (this.lastUpdatedTime === null || t >= this.lastUpdatedTime) {
+      this.lastUpdatedTime = t;
+      this.series.update({ time: t, open: c.open, high: c.high, low: c.low, close: c.close });
+      this.volume.update({
+        time: t,
+        value: c.volume,
+        color: c.close >= c.open ? 'rgba(46, 189, 133, 0.35)' : 'rgba(246, 70, 93, 0.35)',
+      });
     }
-    this.lastUpdatedTime = t;
-
-    this.series.update({ time: t, open: c.open, high: c.high, low: c.low, close: c.close });
-    this.volume.update({
-      time: t,
-      value: c.volume,
-      color: c.close >= c.open ? 'rgba(46, 189, 133, 0.35)' : 'rgba(246, 70, 93, 0.35)',
-    });
 
     const last = this.candles[this.candles.length - 1];
     if (last && last.openTime === c.openTime) {
@@ -314,6 +312,7 @@ export class ChartView {
       this.candles.push(c);
     }
 
+    // Always update visual LTP line regardless of series time guard.
     this.ltpAnimator.snapTo(c.close);
   }
 
@@ -329,14 +328,12 @@ export class ChartView {
       const newCandle: Candle = { openTime: newOpenTime, open: price, high: price, low: price, close: price, volume: 0 };
       const t = (newOpenTime / 1000) as UTCTimestamp;
 
-      if (this.lastUpdatedTime !== null && t < this.lastUpdatedTime) {
-        return;
+      if (this.lastUpdatedTime === null || t >= this.lastUpdatedTime) {
+        this.lastUpdatedTime = t;
+        this.candles.push(newCandle);
+        this.series.update({ time: t, open: price, high: price, low: price, close: price });
+        this.volume.update({ time: t, value: 0, color: 'rgba(255, 255, 255, 0.18)' });
       }
-      this.lastUpdatedTime = t;
-
-      this.candles.push(newCandle);
-      this.series.update({ time: t, open: price, high: price, low: price, close: price });
-      this.volume.update({ time: t, value: 0, color: 'rgba(255, 255, 255, 0.18)' });
       this.ltpAnimator.snapTo(price);
       return;
     }
@@ -356,14 +353,12 @@ export class ChartView {
       const newCandle: Candle = { openTime, open: price, high: price, low: price, close: price, volume: 0 };
       const t = (openTime / 1000) as UTCTimestamp;
 
-      if (this.lastUpdatedTime !== null && t < this.lastUpdatedTime) {
-        return;
+      if (this.lastUpdatedTime === null || t >= this.lastUpdatedTime) {
+        this.lastUpdatedTime = t;
+        this.candles.push(newCandle);
+        this.series.update({ time: t, open: price, high: price, low: price, close: price });
+        this.volume.update({ time: t, value: 0, color: 'rgba(255, 255, 255, 0.18)' });
       }
-      this.lastUpdatedTime = t;
-
-      this.candles.push(newCandle);
-      this.series.update({ time: t, open: price, high: price, low: price, close: price });
-      this.volume.update({ time: t, value: 0, color: 'rgba(255, 255, 255, 0.18)' });
     }
 
     this.ltpAnimator.snapTo(price);

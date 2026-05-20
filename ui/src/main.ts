@@ -233,6 +233,40 @@ const main = (): void => {
     unsubs.length = 0;
   };
 
+  // Header ticker (BID/ASK/SPREAD/price)
+  let lastPrice: number | null = null;
+  const fmt = (n: number): string => {
+    const p = chart.getPrecision() ?? 2;
+    return n.toLocaleString(undefined, { minimumFractionDigits: p, maximumFractionDigits: p });
+  };
+
+  const updateHeaderPrice = (price: number): void => {
+    if (typeof price !== 'number' || !isFinite(price) || price <= 0) return;
+    const hdrPrice = document.getElementById('hdr-price');
+    const hdrChange = document.getElementById('hdr-change');
+    if (hdrPrice) hdrPrice.textContent = fmt(price);
+    if (hdrChange && lastPrice !== null && lastPrice > 0) {
+      const pct = ((price - lastPrice) / lastPrice) * 100;
+      hdrChange.classList.remove('bull', 'bear', 'neutral');
+      hdrChange.classList.add(pct > 0 ? 'bull' : pct < 0 ? 'bear' : 'neutral');
+      hdrChange.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%`;
+    }
+    lastPrice = price;
+  };
+
+  // updateHeaderTicker only writes bid/ask/spread — price/change are owned by updateHeaderPrice.
+  const updateHeaderTicker = (bid: number, ask: number): void => {
+    const hdrBid = document.getElementById('hdr-bid');
+    const hdrAsk = document.getElementById('hdr-ask');
+    const hdrSpread = document.getElementById('hdr-spread');
+    if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0) return;
+    const mid = (bid + ask) / 2;
+    const spread = ask - bid;
+    if (hdrBid) hdrBid.textContent = fmt(bid);
+    if (hdrAsk) hdrAsk.textContent = fmt(ask);
+    if (hdrSpread) hdrSpread.textContent = `${fmt(spread)} (${((spread / mid) * 10_000).toFixed(2)} bps)`;
+  };
+
   const applyState = (state: AppState): void => {
     activeState = state;
     writeHash(state);
@@ -289,6 +323,8 @@ const main = (): void => {
     unsubs.push(client.streamAnalytics(state.provider, state.symbol, (data) => {
       chart.updateAnalytics(data);
       chart.renderVolumeProfile();
+      // Analytics stream often carries the latest LTP as well; use as fallback.
+      updateHeaderPrice(data.ltp);
     }));
     unsubs.push(client.streamAISignals(state.provider, state.symbol, (sig) => {
       chart.applyAISignal(sig);
@@ -296,45 +332,6 @@ const main = (): void => {
     unsubs.push(client.streamAIAnnotation(state.provider, state.symbol, (ann) => {
       chart.applyAIAnnotation(ann);
     }));
-  };
-
-  // Global cross-instrument correlation: published to a fixed Redis topic
-  // by the AI engine. We expose a tiny REST-less SSE-style listener via the
-  // existing WS multiplexer.
-  client.streamAIAnnotation('ai', 'GLOBAL', (ann) => {
-    if (ann.kind === 'correlation') chart.applyAIAnnotation(ann);
-  });
-
-  // Header ticker (BID/ASK/SPREAD/price)
-  let lastPrice: number | null = null;
-  const fmt = (n: number): string => {
-    const p = chart.getPrecision();
-    return n.toLocaleString(undefined, { minimumFractionDigits: p, maximumFractionDigits: p });
-  };
-  const updateHeaderPrice = (price: number): void => {
-    if (!Number.isFinite(price) || price <= 0) return;
-    const hdrPrice = document.getElementById('hdr-price');
-    const hdrChange = document.getElementById('hdr-change');
-    if (hdrPrice) hdrPrice.textContent = fmt(price);
-    if (hdrChange && lastPrice !== null && lastPrice > 0) {
-      const pct = ((price - lastPrice) / lastPrice) * 100;
-      hdrChange.classList.remove('bull', 'bear', 'neutral');
-      hdrChange.classList.add(pct > 0 ? 'bull' : pct < 0 ? 'bear' : 'neutral');
-      hdrChange.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%`;
-    }
-    lastPrice = price;
-  };
-  // updateHeaderTicker only writes bid/ask/spread — price/change are owned by updateHeaderPrice.
-  const updateHeaderTicker = (bid: number, ask: number): void => {
-    const hdrBid = document.getElementById('hdr-bid');
-    const hdrAsk = document.getElementById('hdr-ask');
-    const hdrSpread = document.getElementById('hdr-spread');
-    if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0) return;
-    const mid = (bid + ask) / 2;
-    const spread = ask - bid;
-    if (hdrBid) hdrBid.textContent = fmt(bid);
-    if (hdrAsk) hdrAsk.textContent = fmt(ask);
-    if (hdrSpread) hdrSpread.textContent = `${fmt(spread)} (${((spread / mid) * 10_000).toFixed(2)} bps)`;
   };
 
   new GlobalSearch(
