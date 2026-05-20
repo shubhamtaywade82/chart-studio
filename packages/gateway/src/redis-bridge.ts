@@ -74,7 +74,7 @@ export class RedisBridge {
     this.pub.publish(ctrlTopic(provider), JSON.stringify(msg)).catch(() => {});
   }
 
-  async discover<T = unknown>(provider: string, op: 'search' | 'list' | 'meta', payload: Partial<DiscoverRequest> = {}, timeoutMs = 5000): Promise<T | null> {
+  async discover<T = unknown>(provider: string, op: 'search' | 'list' | 'meta' | 'candles', payload: Partial<DiscoverRequest> = {}, timeoutMs = 10_000): Promise<T | null> {
     const reqId = randomUUID();
     const req: DiscoverRequest = { reqId, op, ...payload };
     const replyTopic = discoverRepTopic(provider, reqId);

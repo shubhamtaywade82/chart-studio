@@ -39,11 +39,15 @@ export interface CtrlMessage {
 
 export interface DiscoverRequest {
   reqId: string;
-  op: 'search' | 'list' | 'meta';
+  op: 'search' | 'list' | 'meta' | 'candles';
   query?: string;
   symbol?: string;
   filter?: Record<string, unknown>;
   limit?: number;
+  /** for op='candles' */
+  interval?: string;
+  startTime?: number;
+  endTime?: number;
 }
 
 export interface DiscoverReply<T = unknown> {

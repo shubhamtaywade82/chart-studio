@@ -221,6 +221,14 @@ export class RedisAdapter {
         if (req.op === 'search') return { reqId: req.reqId, ok: true, data: await this.provider.searchSymbols(req.query ?? '', req.limit) };
         if (req.op === 'list')   return { reqId: req.reqId, ok: true, data: await this.provider.listSymbols(req.filter as { segment?: string } | undefined) };
         if (req.op === 'meta')   return { reqId: req.reqId, ok: true, data: await this.provider.getInstrumentMeta(req.symbol ?? '') };
+        if (req.op === 'candles') return {
+          reqId: req.reqId, ok: true,
+          data: await this.provider.getCandles(req.symbol ?? '', req.interval ?? '1m', {
+            limit: req.limit ?? 500,
+            ...(req.startTime !== undefined ? { startTime: req.startTime } : {}),
+            ...(req.endTime !== undefined ? { endTime: req.endTime } : {}),
+          }),
+        };
         return { reqId: req.reqId, ok: false, error: `unknown op: ${req.op}` };
       } catch (err) {
         return { reqId: req.reqId, ok: false, error: err instanceof Error ? err.message : String(err) };

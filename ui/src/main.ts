@@ -304,6 +304,22 @@ const main = (): void => {
     lastPrice = null;
     scriptManager.setCandles([]);
 
+    chart.setLoadOlderCallback(async (oldestOpenTime: number) => {
+      try {
+        const params = new URLSearchParams({
+          provider: state.provider, symbol: state.symbol, interval: state.interval,
+          endTime: String(oldestOpenTime - 1), limit: '500',
+        });
+        const res = await fetch(`/api/candles/history?${params.toString()}`);
+        if (!res.ok) return;
+        const older = await res.json() as Candle[];
+        if (!Array.isArray(older) || older.length === 0) return;
+        chart.prependHistory(older);
+        currentCandles = [...older, ...currentCandles].sort((a, b) => a.openTime - b.openTime);
+        scriptManager.setCandles(currentCandles);
+      } catch { /* swallow */ }
+    });
+
     unsubs.push(client.streamCandles(
       state.provider, state.symbol, state.interval,
       (history) => {

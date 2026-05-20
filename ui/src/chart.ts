@@ -775,6 +775,38 @@ export class ChartView {
       this.atLive = atLive;
       for (const fn of this.liveListeners) fn(atLive);
     }
+    // Lazy-load older history when the user scrolls left and we're within the
+    // first ~10 bars of the loaded window.
+    if (range.from < 10 && this.candles.length > 0 && this.onLoadOlder && !this.olderLoading) {
+      this.olderLoading = true;
+      const oldest = this.candles[0]!.openTime;
+      void this.onLoadOlder(oldest).finally(() => { this.olderLoading = false; });
+    }
+  }
+
+  private olderLoading = false;
+  private onLoadOlder: ((endTime: number) => Promise<void>) | null = null;
+  setLoadOlderCallback(fn: (endTime: number) => Promise<void>): void { this.onLoadOlder = fn; }
+
+  /** Prepend older candles without resetting visible range. */
+  prependHistory(older: Candle[]): void {
+    if (older.length === 0) return;
+    const existing = new Set(this.candles.map((c) => c.openTime));
+    const fresh = older.filter((c) => !existing.has(c.openTime));
+    if (fresh.length === 0) return;
+    this.candles = [...fresh, ...this.candles].sort((a, b) => a.openTime - b.openTime);
+    const cs = this.candles.map((c) => ({
+      time: Math.floor(c.openTime / 1000) as UTCTimestamp,
+      open: c.open, high: c.high, low: c.low, close: c.close,
+    }));
+    const vs = this.candles.map((c) => ({
+      time: Math.floor(c.openTime / 1000) as UTCTimestamp,
+      value: c.volume,
+      color: c.close >= c.open ? 'rgba(46, 189, 133, 0.35)' : 'rgba(246, 70, 93, 0.35)',
+    }));
+    this.series.setData(cs);
+    this.volume.setData(vs);
+    for (const smc of this.smcPrimitives) smc.setCandles(this.candles);
   }
 
   dispose(): void {

@@ -118,6 +118,28 @@ const main = async (): Promise<void> => {
       return;
     }
 
+    // ── Historic candles (lazy left-scroll) ──────────────────────────────
+    if (url.pathname === '/candles/history') {
+      const provider = url.searchParams.get('provider') ?? '';
+      const symbol = url.searchParams.get('symbol') ?? '';
+      const interval = url.searchParams.get('interval') ?? '1m';
+      const endTime = Number(url.searchParams.get('endTime') ?? 0);
+      const limit = Math.min(1500, Math.max(1, Number(url.searchParams.get('limit') ?? 500)));
+      if (!provider || !symbol || !endTime) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'provider, symbol, endTime required' }));
+        return;
+      }
+      bridge.discover(provider, 'candles', { symbol, interval, endTime, limit }, 15_000).then((bars) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(bars ?? []));
+      }).catch((err) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      });
+      return;
+    }
+
     // ── AI Brief ─────────────────────────────────────────────────────────
     if (url.pathname === '/brief') {
       handleBriefRequest(req, res, url).catch((err) => {
