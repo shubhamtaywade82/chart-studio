@@ -633,8 +633,27 @@ export class ChartView {
   dispose(): void {
     this.ltpAnimator.flush();
     this.resizeObs.disconnect();
+    // Detach LTP primitive so its requestUpdate callback can't fire on a
+    // disposed chart.
+    try { this.series.detachPrimitive(this.ltp); } catch { /* noop */ }
+    this.analytics?.reset();
+    this.alertSystem.reset();
+    this.latencyMonitor.reset();
+    this.volumeProfile.reset();
     this.depthHeatmap.dispose();
     this.volumeProfile.dispose();
+    this.aiOverlay.reset();
+    this.crosshairListeners.clear();
+    this.liveListeners.clear();
+    this.alertListeners.clear();
+    // Drop indicator series before chart.remove() so requestUpdate hooks
+    // do not see a partially-torn-down chart.
+    for (const seriesList of this.indicatorSeries.values()) {
+      for (const s of seriesList) {
+        try { this.chart.removeSeries(s); } catch { /* noop */ }
+      }
+    }
+    this.indicatorSeries.clear();
     this.chart.remove();
   }
 }

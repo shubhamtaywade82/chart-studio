@@ -51,6 +51,7 @@ export class AnalyticsRenderer {
       try { this.mainSeries.removePriceLine(line); } catch { /* noop */ }
     }
     this.dayLevelLines.clear();
+    this.dayLevelLastPrice?.clear();
   }
 
   /**

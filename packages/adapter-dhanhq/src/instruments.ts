@@ -78,7 +78,11 @@ const parseScripMaster = (csv: string): DhanInstrument[] => {
 
   const segmentFromRow = (exchId: string, instrumentType: string, raw?: string): string => {
     if (raw && /^[A-Z_]+$/.test(raw)) return raw;
-    if (instrumentType === 'EQUITY' || instrumentType === 'INDEX') {
+    // Indices use the dedicated IDX_I segment (code 0). Routing them as
+    // NSE_EQ causes the binary feed to drop their ticks (frames come back
+    // with exchangeSegmentCode=0 but subscription keyed under NSE_EQ:13).
+    if (instrumentType === 'INDEX') return 'IDX_I';
+    if (instrumentType === 'EQUITY') {
       if (exchId === 'NSE') return 'NSE_EQ';
       if (exchId === 'BSE') return 'BSE_EQ';
     }
@@ -86,6 +90,10 @@ const parseScripMaster = (csv: string): DhanInstrument[] => {
       if (exchId === 'NSE') return 'NSE_FNO';
       if (exchId === 'BSE') return 'BSE_FNO';
       if (exchId === 'MCX') return 'MCX_COMM';
+    }
+    if (instrumentType === 'CURRENCY') {
+      if (exchId === 'NSE') return 'NSE_CURRENCY';
+      if (exchId === 'BSE') return 'BSE_CURRENCY';
     }
     if (exchId === 'MCX') return 'MCX_COMM';
     return `${exchId}_EQ`;
@@ -178,11 +186,28 @@ export const fetchInstrumentsFromApi = async (client: AxiosInstance, segments: s
   return all;
 };
 
+/**
+ * Synchronous lookup against the in-memory cache. Returns null if cache
+ * isn't populated yet. Prefer findInstrumentAsync() in code paths that may
+ * run before the scrip master loads (e.g. ws sub on a fresh adapter boot).
+ */
 export const findInstrument = (symbol: string): DhanInstrument | null => {
   if (!cache) return null;
   const [seg, id] = symbol.split(':');
   if (!seg || !id) return null;
   return cache.byKey.get(`${seg.toUpperCase()}:${id}`) ?? null;
+};
+
+/**
+ * Async lookup that auto-populates the cache on first miss. Use this from
+ * provider stream methods to avoid silent null returns when the adapter
+ * has just started and the scrip master hasn't loaded yet.
+ */
+export const findInstrumentAsync = async (symbol: string, scripMasterUrl?: string): Promise<DhanInstrument | null> => {
+  const cached = findInstrument(symbol);
+  if (cached) return cached;
+  await loadInstruments(scripMasterUrl).catch(() => undefined);
+  return findInstrument(symbol);
 };
 
 export const toSymbolRef = (providerId: string, ins: DhanInstrument): SymbolRef => ({

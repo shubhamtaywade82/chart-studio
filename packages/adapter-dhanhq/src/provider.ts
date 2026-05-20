@@ -12,6 +12,7 @@ import type {
 } from '@chart-studio/adapter-core';
 import {
   findInstrument,
+  findInstrumentAsync,
   loadInstruments,
   fetchInstrumentsFromApi,
   searchInstruments,
@@ -108,49 +109,82 @@ export class DhanProvider implements MarketDataProvider {
 
   // ── Streams ──────────────────────────────────────────────────────────
 
-  streamCandles(symbol: string, interval: string, onCandle: (c: Candle, isFinal: boolean) => void): Unsub {
-    const ins = findInstrument(symbol);
-    if (!ins) return () => undefined;
+  /**
+   * Resolves the instrument synchronously when possible, async otherwise.
+   * Returns a deferred-subscription Unsub so callers can `unsubs.push(...)`
+   * immediately even if the scrip master hasn't loaded yet.
+   */
+  private deferredSubscribe(symbol: string, attach: (ins: DhanInstrument) => Unsub): Unsub {
+    const cached = findInstrument(symbol);
+    if (cached) return attach(cached);
 
+    let realUnsub: Unsub | null = null;
+    let cancelled = false;
+    void findInstrumentAsync(symbol, this.cfg.scripMasterUrl).then((ins) => {
+      if (cancelled || !ins) {
+        if (!ins) console.warn(`[dhanhq] instrument not found: ${symbol}`);
+        return;
+      }
+      realUnsub = attach(ins);
+    });
+    return () => {
+      cancelled = true;
+      if (realUnsub) try { realUnsub(); } catch { /* noop */ }
+    };
+  }
+
+  streamCandles(symbol: string, interval: string, onCandle: (c: Candle, isFinal: boolean) => void): Unsub {
     const ms = INTERVAL_MS[interval] ?? 60_000;
     let current: Candle | null = null;
+    /** Day cumulative volume at this candle's open; subtracted to derive candle volume. */
+    let baseVol: number | null = null;
 
-    return this.pool.subscribe(
+    return this.deferredSubscribe(symbol, (ins) => this.pool.subscribe(
       { exchangeSegment: ins.exchangeSegment, securityId: ins.securityId },
       (tick: DhanTick) => {
         if (typeof tick.ltp !== 'number') return;
         const now = Date.now();
         const openTime = Math.floor(now / ms) * ms;
+        const dayCumVol = typeof tick.volume === 'number' ? tick.volume : null;
 
         if (!current || current.openTime !== openTime) {
           if (current) onCandle(current, true);
+          // Anchor base volume to current day-total so this candle's volume
+          // starts at 0 and accumulates only future tick deltas.
+          baseVol = dayCumVol;
           current = {
             openTime,
             open: tick.ltp,
             high: tick.ltp,
             low: tick.ltp,
             close: tick.ltp,
-            volume: typeof tick.volume === 'number' ? tick.volume : 0,
+            volume: 0,
           };
         } else {
+          const candleVol = (dayCumVol !== null && baseVol !== null)
+            ? Math.max(0, dayCumVol - baseVol)
+            : current.volume;
           current = {
             ...current,
             high: Math.max(current.high, tick.ltp),
             low: Math.min(current.low, tick.ltp),
             close: tick.ltp,
-            volume: typeof tick.volume === 'number' ? tick.volume : current.volume,
+            volume: candleVol,
           };
         }
         onCandle(current, false);
       },
-    );
+    ));
   }
 
   streamDepth(symbol: string, onDelta: (d: DepthDelta) => void): Unsub {
-    const ins = findInstrument(symbol);
-    if (!ins) return () => undefined;
+    // Depth requires Full mode (RequestCode 21). Warn loudly if misconfigured —
+    // ticker/quote feeds will never carry depth and the panel will stay empty.
+    if (this.cfg.feedMode && this.cfg.feedMode !== 'full') {
+      console.warn(`[dhanhq] streamDepth requires feedMode='full' (got '${this.cfg.feedMode}'); depth panel will be empty.`);
+    }
     let counter = 0;
-    return this.pool.subscribe(
+    return this.deferredSubscribe(symbol, (ins) => this.pool.subscribe(
       { exchangeSegment: ins.exchangeSegment, securityId: ins.securityId },
       (tick: DhanTick) => {
         if (!tick.bids || !tick.asks) return; // only Full packets carry depth
@@ -166,14 +200,12 @@ export class DhanProvider implements MarketDataProvider {
           replacement: true,
         });
       },
-    );
+    ));
   }
 
   streamTrades(symbol: string, onTrade: (t: Trade) => void): Unsub {
-    const ins = findInstrument(symbol);
-    if (!ins) return () => undefined;
     let lastLtt: number | undefined;
-    return this.pool.subscribe(
+    return this.deferredSubscribe(symbol, (ins) => this.pool.subscribe(
       { exchangeSegment: ins.exchangeSegment, securityId: ins.securityId },
       (tick: DhanTick) => {
         if (typeof tick.ltp !== 'number') return;
@@ -186,13 +218,14 @@ export class DhanProvider implements MarketDataProvider {
           makerSide: false,
         });
       },
-    );
+    ));
   }
 
   streamBookTicker(symbol: string, onTicker: (t: BookTicker) => void): Unsub {
-    const ins = findInstrument(symbol);
-    if (!ins) return () => undefined;
-    return this.pool.subscribe(
+    if (this.cfg.feedMode && this.cfg.feedMode !== 'full') {
+      console.warn(`[dhanhq] streamBookTicker needs feedMode='full' for top-of-book; current='${this.cfg.feedMode}'.`);
+    }
+    return this.deferredSubscribe(symbol, (ins) => this.pool.subscribe(
       { exchangeSegment: ins.exchangeSegment, securityId: ins.securityId },
       (tick: DhanTick) => {
         const bid = tick.bids?.[0];
@@ -206,17 +239,15 @@ export class DhanProvider implements MarketDataProvider {
           ts: tick.ts,
         });
       },
-    );
+    ));
   }
 
   streamAnalytics(
     symbol: string,
     onData: (data: AnalyticsPayload) => void,
   ): Unsub {
-    const ins = findInstrument(symbol);
-    if (!ins) return () => undefined;
     const state = { dayOpen: 0, dayHigh: 0, dayLow: 0, dayClose: 0, prevClose: 0, prevOi: 0 };
-    return this.pool.subscribe(
+    return this.deferredSubscribe(symbol, (ins) => this.pool.subscribe(
       { exchangeSegment: ins.exchangeSegment, securityId: ins.securityId },
       (tick: DhanTick) => {
         if (typeof tick.ltp !== 'number') return;
@@ -259,7 +290,7 @@ export class DhanProvider implements MarketDataProvider {
           prevOi: state.prevOi || undefined,
         });
       },
-    );
+    ));
   }
 }
 

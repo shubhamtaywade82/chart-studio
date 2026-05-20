@@ -253,6 +253,12 @@ export class DhanStreamPool {
   private mode: number;
   /** Throttle for unmatched-tick warnings. */
   private unmatchedWarned = 0;
+  /** Timestamp (ms) of last received frame. Used to detect data starvation. */
+  private lastFrameAt = 0;
+  /** Periodic heartbeat tick to detect dead/silent sockets. */
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  /** Public mode field so callers can verify (e.g. depth requires REQ_FULL). */
+  get currentMode(): number { return this.mode; }
 
   constructor(private readonly tokens: TokenProvider, mode: 'ticker' | 'quote' | 'full' = 'full') {
     this.mode = mode === 'ticker' ? REQ_TICKER : mode === 'quote' ? REQ_QUOTE : REQ_FULL;
@@ -283,10 +289,38 @@ export class DhanStreamPool {
     this.closed = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
+    this.stopHeartbeat();
     if (this.ws) {
       try { this.ws.send(JSON.stringify({ RequestCode: REQ_DISCONNECT })); } catch { /* noop */ }
       try { this.ws.close(); } catch { /* noop */ }
     }
+  }
+
+  /**
+   * Data-starvation watchdog. Dhan v2 doesn't expose a ping/pong protocol,
+   * so we use TCP-level WebSocket pings AND a 30-second idle threshold:
+   * if no frame in 30s with active subs, force-reconnect.
+   */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.lastFrameAt = Date.now();
+    this.heartbeatTimer = setInterval(() => {
+      const ws = this.ws;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      try { ws.ping(); } catch { /* noop */ }
+
+      if (this.subs.size === 0) return; // nothing subscribed → no expectation
+      const idle = Date.now() - this.lastFrameAt;
+      if (idle > 30_000) {
+        console.warn(`[adapter-dhanhq] data starvation (${idle}ms idle, ${this.subs.size} subs) — forcing reconnect`);
+        try { ws.terminate(); } catch { /* close handler will reconnect */ }
+      }
+    }, 10_000);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = null;
   }
 
   private ensureConnected(): void {
@@ -321,10 +355,28 @@ export class DhanStreamPool {
       this.reconnectAttempts = 0;
       const list: DhanSubscription[] = [...this.subs.values()].map((s) => s.ins);
       if (list.length > 0) this.sendSub(list);
+      this.startHeartbeat();
     });
+
+    ws.on('pong', () => { this.lastFrameAt = Date.now(); });
 
     ws.on('message', (raw) => {
       if (!(raw instanceof Buffer)) return;
+      this.lastFrameAt = Date.now();
+
+      // Validate header length field if present. Reject obviously truncated frames
+      // so we don't read garbage past the buffer end.
+      if (raw.length >= 8) {
+        const msgLen = raw.readInt16LE(1);
+        if (msgLen > 0 && raw.length < msgLen) {
+          if (this.unmatchedWarned < 5) {
+            this.unmatchedWarned += 1;
+            console.warn(`[adapter-dhanhq] truncated frame: header says ${msgLen} bytes, got ${raw.length}`);
+          }
+          return;
+        }
+      }
+
       const tick = parseTick(raw);
       if (!tick) return;
 
@@ -357,6 +409,7 @@ export class DhanStreamPool {
     ws.on('close', (code) => {
       if (this.ws !== ws) return;
       this.ws = null;
+      this.stopHeartbeat();
       if (this.closed) return;
       // 401-equivalent close codes — refresh token before next reconnect.
       if (code === 1008 || code === 4001 || code === 4003) this.tokens.invalidate();
