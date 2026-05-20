@@ -504,7 +504,7 @@ export class ChartView {
 
     this.analytics.update(state);
     this.depthHeatmap.update(data.depthBids, data.depthAsks);
-    this.volumeProfile.update(data.ltp, 1 / Math.pow(10, this.getPrecision()), data.ltq);
+    this.updateVolumeProfile(data.ltp, data.ltq);
 
     if (data.ltt > 0) this.latencyMonitor.recordTick(data.ltt);
 
@@ -543,6 +543,12 @@ export class ChartView {
 
   getLatencyStats() {
     return this.latencyMonitor.getStats();
+  }
+
+  updateVolumeProfile(price: number, qty: number): void {
+    const precision = this.getPrecision();
+    const tickSize = 1 / Math.pow(10, precision);
+    this.volumeProfile.update(price, tickSize, qty);
   }
 
   renderVolumeProfile(): void {

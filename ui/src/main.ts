@@ -338,10 +338,13 @@ const main = (): void => {
       sentiment.push(t);
       microstructure.pushTrade(t);
       chart.setLastTradePrice(t.price, t.ts, t.qty);
+      chart.updateVolumeProfile(t.price, t.qty);
+      chart.renderVolumeProfile();
       if (t.makerSide) tapeSells += 1; else tapeBuys += 1;
       if (tapeBuysEl) tapeBuysEl.textContent = String(tapeBuys);
       if (tapeSellsEl) tapeSellsEl.textContent = String(tapeSells);
     }));
+
     unsubs.push(client.streamBookTicker(state.provider, state.symbol, (bt) => updateHeaderTicker(bt.bestBidPrice, bt.bestAskPrice)));
     unsubs.push(client.streamAnalytics(state.provider, state.symbol, (data) => {
       chart.updateAnalytics(data);
