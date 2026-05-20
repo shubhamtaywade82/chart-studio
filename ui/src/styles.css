@@ -566,3 +566,22 @@ body::before {
 .toast { background: var(--bg-card); border: 1px solid var(--amber); padding: 10px 14px; border-radius: var(--radius-sm); min-width: 240px; transition: opacity 0.4s; box-shadow: 0 8px 24px rgba(0,0,0,0.5); color: var(--text-primary); }
 .toast.fade { opacity: 0; }
 .toast-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+/* ── AI Overlay ─────────────────────────────────────────────────────── */
+@keyframes ai-pulse-anim {
+  0%, 100% { background: rgba(255, 82, 82, 0.08); }
+  50%      { background: rgba(255, 82, 82, 0.22); }
+}
+.ai-pulse { animation: ai-pulse-anim 1.2s ease-in-out infinite; }
+
+@keyframes ai-toxic-border-anim {
+  0%, 100% { box-shadow: inset 0 0 0 2px rgba(239, 83, 80, 0.35); }
+  50%      { box-shadow: inset 0 0 0 2px rgba(239, 83, 80, 0.75); }
+}
+.ai-toxic-border { animation: ai-toxic-border-anim 1.5s ease-in-out infinite; }
+
+#ai-regime-tag[data-regime="trending-up"]   { color: #00e676; }
+#ai-regime-tag[data-regime="trending-down"] { color: #ff5252; }
+#ai-regime-tag[data-regime="breakout"]      { color: #ffd740; }
+#ai-regime-tag[data-regime="distribution"]  { color: #ef5350; }
+#ai-regime-tag[data-regime="accumulation"]  { color: #26a69a; }

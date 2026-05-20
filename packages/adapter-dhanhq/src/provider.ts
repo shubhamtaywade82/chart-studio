@@ -211,29 +211,32 @@ export class DhanProvider implements MarketDataProvider {
 
   streamAnalytics(
     symbol: string,
-    onData: (data: {
-      ltp: number; atp: number; ltq: number; ltt: number;
-      volume: number; totalBuyQty: number; totalSellQty: number;
-      oi: number | undefined; highOi: number | undefined; lowOi: number | undefined;
-      dayOpen: number; dayHigh: number; dayLow: number; dayClose: number;
-      bidOrders: number[] | undefined; askOrders: number[] | undefined;
-      prevClose: number | undefined; prevOi: number | undefined;
-    }) => void,
+    onData: (data: AnalyticsPayload) => void,
   ): Unsub {
     const ins = findInstrument(symbol);
     if (!ins) return () => undefined;
-    let state = { dayOpen: 0, dayHigh: 0, dayLow: 0, dayClose: 0, prevClose: 0, prevOi: 0 };
+    const state = { dayOpen: 0, dayHigh: 0, dayLow: 0, dayClose: 0, prevClose: 0, prevOi: 0 };
     return this.pool.subscribe(
       { exchangeSegment: ins.exchangeSegment, securityId: ins.securityId },
       (tick: DhanTick) => {
         if (typeof tick.ltp !== 'number') return;
-        // Update day OHLC from packet (fresh from Dhan)
+
+        // Update day OHLC from packets that carry them (Quote=4 / Full=8).
+        // Note: code 6 (PrevClose) does NOT set tick.close anymore — it sets
+        // tick.prevClose, so dayClose stays stable across packet types.
         if (typeof tick.open === 'number') state.dayOpen = tick.open;
         if (typeof tick.high === 'number') state.dayHigh = tick.high;
         if (typeof tick.low === 'number') state.dayLow = tick.low;
         if (typeof tick.close === 'number') state.dayClose = tick.close;
         if (typeof tick.prevClose === 'number') state.prevClose = tick.prevClose;
         if (typeof tick.prevOi === 'number') state.prevOi = tick.prevOi;
+
+        const depthBids = tick.bids
+          ?.filter(([p]) => Number.isFinite(p) && p > 0)
+          .map(([price, qty, orders]) => ({ price, qty, orders }));
+        const depthAsks = tick.asks
+          ?.filter(([p]) => Number.isFinite(p) && p > 0)
+          .map(([price, qty, orders]) => ({ price, qty, orders }));
 
         onData({
           ltp: tick.ltp,
@@ -250,12 +253,33 @@ export class DhanProvider implements MarketDataProvider {
           dayHigh: state.dayHigh,
           dayLow: state.dayLow,
           dayClose: state.dayClose,
-          bidOrders: tick.bidOrders,
-          askOrders: tick.askOrders,
-          prevClose: state.prevClose,
-          prevOi: state.prevOi,
+          depthBids,
+          depthAsks,
+          prevClose: state.prevClose || undefined,
+          prevOi: state.prevOi || undefined,
         });
       },
     );
   }
+}
+
+export interface AnalyticsPayload {
+  ltp: number;
+  atp: number;
+  ltq: number;
+  ltt: number;
+  volume: number;
+  totalBuyQty: number;
+  totalSellQty: number;
+  oi: number | undefined;
+  highOi: number | undefined;
+  lowOi: number | undefined;
+  dayOpen: number;
+  dayHigh: number;
+  dayLow: number;
+  dayClose: number;
+  depthBids: Array<{ price: number; qty: number; orders: number }> | undefined;
+  depthAsks: Array<{ price: number; qty: number; orders: number }> | undefined;
+  prevClose: number | undefined;
+  prevOi: number | undefined;
 }

@@ -290,7 +290,20 @@ const main = (): void => {
       chart.updateAnalytics(data);
       chart.renderVolumeProfile();
     }));
+    unsubs.push(client.streamAISignals(state.provider, state.symbol, (sig) => {
+      chart.applyAISignal(sig);
+    }));
+    unsubs.push(client.streamAIAnnotation(state.provider, state.symbol, (ann) => {
+      chart.applyAIAnnotation(ann);
+    }));
   };
+
+  // Global cross-instrument correlation: published to a fixed Redis topic
+  // by the AI engine. We expose a tiny REST-less SSE-style listener via the
+  // existing WS multiplexer.
+  client.streamAIAnnotation('ai', 'GLOBAL', (ann) => {
+    if (ann.kind === 'correlation') chart.applyAIAnnotation(ann);
+  });
 
   // Header ticker (BID/ASK/SPREAD/price)
   let lastPrice: number | null = null;

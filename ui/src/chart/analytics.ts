@@ -1,4 +1,4 @@
-import type { IChartApi, ISeriesApi, Time, UTCTimestamp } from 'lightweight-charts';
+import type { IChartApi, ISeriesApi, UTCTimestamp } from 'lightweight-charts';
 import { LineSeries, HistogramSeries, LineStyle } from 'lightweight-charts';
 
 export interface AnalyticsState {
@@ -27,14 +27,37 @@ export class AnalyticsRenderer {
   private atpSeries: ISeriesApi<'Line'> | null = null;
   private cvdSeries: ISeriesApi<'Histogram'> | null = null;
   private oiSeries: ISeriesApi<'Histogram'> | null = null;
-  private dayLevelLines: Map<string, any> = new Map();
-  private cvdHistory: number[] = [];
-  private oiHistory: Array<{ time: UTCTimestamp; oi: number; change: number }> = [];
-  private prevOi = 0;
+  private dayLevelLines: Map<string, ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']>> = new Map();
+  private cumulativeDelta = 0;
+  /** Last seen cumulative day totals. Used to compute per-tick deltas. */
+  private lastBuyQty = 0;
+  private lastSellQty = 0;
+  private lastOi = 0;
+  /** First-tick flags to avoid spurious deltas on symbol switch. */
+  private buyInit = false;
+  private oiInit = false;
 
   constructor(private chart: IChartApi, private mainSeries: ISeriesApi<'Candlestick'>) {}
 
-  setupSeries(): void {
+  /** Reset tick-state when symbol/interval changes. */
+  reset(): void {
+    this.cumulativeDelta = 0;
+    this.lastBuyQty = 0;
+    this.lastSellQty = 0;
+    this.lastOi = 0;
+    this.buyInit = false;
+    this.oiInit = false;
+    for (const line of this.dayLevelLines.values()) {
+      try { this.mainSeries.removePriceLine(line); } catch { /* noop */ }
+    }
+    this.dayLevelLines.clear();
+  }
+
+  /**
+   * Allocate analytics series. Pane indices are negotiated externally to
+   * avoid colliding with indicator sub-panes (RSI/MACD also use 1+).
+   */
+  setupSeries(cvdPane: number, oiPane: number): void {
     // ATP line overlay on main pane
     this.atpSeries = this.chart.addSeries(LineSeries, {
       color: '#ffaa00',
@@ -50,7 +73,7 @@ export class AnalyticsRenderer {
       priceFormat: { type: 'volume' },
       title: 'CVD',
       priceScaleId: 'cvd',
-    }, 1);
+    }, cvdPane);
     this.chart.priceScale('cvd').applyOptions({
       scaleMargins: { top: 0.3, bottom: 0.05 },
     });
@@ -60,7 +83,7 @@ export class AnalyticsRenderer {
       priceFormat: { type: 'volume' },
       title: 'OI Change',
       priceScaleId: 'oi',
-    }, 2);
+    }, oiPane);
     this.chart.priceScale('oi').applyOptions({
       scaleMargins: { top: 0.3, bottom: 0.05 },
     });
@@ -86,43 +109,58 @@ export class AnalyticsRenderer {
       }
     }
 
-    // CVD calculation: delta between buy and sell
-    const delta = state.totalBuyQty - state.totalSellQty;
-    this.cvdHistory.push(delta);
-    const cumulativeDelta = this.cvdHistory.reduce((a, b) => a + b, 0);
-    const cvdColor = cumulativeDelta >= 0 ? 'rgba(46, 189, 133, 0.6)' : 'rgba(246, 70, 93, 0.6)';
-    this.cvdSeries.update({ time: state.time, value: Math.abs(cumulativeDelta), color: cvdColor });
+    // CVD: Dhan's totalBuyQty/totalSellQty are cumulative since market open.
+    // We need per-tick deltas, then accumulate those into CVD.
+    if (state.totalBuyQty > 0 || state.totalSellQty > 0) {
+      if (!this.buyInit) {
+        this.lastBuyQty = state.totalBuyQty;
+        this.lastSellQty = state.totalSellQty;
+        this.buyInit = true;
+      } else {
+        const buyDelta = Math.max(0, state.totalBuyQty - this.lastBuyQty);
+        const sellDelta = Math.max(0, state.totalSellQty - this.lastSellQty);
+        this.lastBuyQty = state.totalBuyQty;
+        this.lastSellQty = state.totalSellQty;
+        this.cumulativeDelta += buyDelta - sellDelta;
+        const cvdColor = this.cumulativeDelta >= 0 ? 'rgba(46, 189, 133, 0.6)' : 'rgba(246, 70, 93, 0.6)';
+        this.cvdSeries.update({ time: state.time, value: Math.abs(this.cumulativeDelta), color: cvdColor });
+      }
+    }
 
-    // OI tracking
-    if (state.oi !== undefined) {
-      const oiChange = state.oi - this.prevOi;
-      this.prevOi = state.oi;
-      const oiColor = oiChange >= 0 ? 'rgba(46, 189, 133, 0.6)' : 'rgba(246, 70, 93, 0.6)';
-      this.oiSeries.update({ time: state.time, value: Math.abs(oiChange), color: oiColor });
-      this.oiHistory.push({ time: state.time, oi: state.oi, change: oiChange });
+    // OI: skip first reading to avoid huge spurious bar on symbol switch.
+    if (state.oi !== undefined && state.oi > 0) {
+      if (!this.oiInit) {
+        this.lastOi = state.oi;
+        this.oiInit = true;
+      } else {
+        const oiChange = state.oi - this.lastOi;
+        this.lastOi = state.oi;
+        const oiColor = oiChange >= 0 ? 'rgba(46, 189, 133, 0.6)' : 'rgba(246, 70, 93, 0.6)';
+        this.oiSeries.update({ time: state.time, value: Math.abs(oiChange), color: oiColor });
+      }
     }
 
     // Day level markers
     this.updateDayLevels(state);
   }
 
+  /** Tracks the last price set per key, to skip no-op recreations. */
+  private dayLevelLastPrice = new Map<string, number>();
+
   private updateDayLevels(state: AnalyticsState): void {
-    const updateLine = (key: string, price: number, color: string, title: string) => {
-      if (!this.dayLevelLines.has(key)) {
-        const line = this.mainSeries.createPriceLine({ price, color, title });
-        this.dayLevelLines.set(key, line);
-      } else {
-        const line = this.dayLevelLines.get(key);
-        if (line) {
-          try {
-            line.applyOptions({ price });
-          } catch {
-            this.dayLevelLines.delete(key);
-            const newLine = this.mainSeries.createPriceLine({ price, color, title });
-            this.dayLevelLines.set(key, newLine);
-          }
-        }
+    const updateLine = (key: string, price: number, color: string, title: string): void => {
+      const prev = this.dayLevelLastPrice.get(key);
+      if (prev === price && this.dayLevelLines.has(key)) return;
+
+      // Remove existing line if present, then recreate. PriceLine.applyOptions
+      // is not reliable across lightweight-charts versions, so we always recreate.
+      const existing = this.dayLevelLines.get(key);
+      if (existing) {
+        try { this.mainSeries.removePriceLine(existing); } catch { /* noop */ }
       }
+      const line = this.mainSeries.createPriceLine({ price, color, title });
+      this.dayLevelLines.set(key, line);
+      this.dayLevelLastPrice.set(key, price);
     };
 
     if (state.dayOpen > 0) updateLine('do', state.dayOpen, '#ffffff', 'DO');
@@ -131,27 +169,16 @@ export class AnalyticsRenderer {
     if (state.prevClose && state.prevClose > 0) updateLine('pc', state.prevClose, '#9c9c9c', 'Prev');
   }
 
-  getOiColor(priceChange: number, oiChange: number): string {
-    if (priceChange > 0 && oiChange > 0) return '#26a69a'; // Long Buildup
-    if (priceChange < 0 && oiChange > 0) return '#ef5350'; // Short Buildup
-    if (priceChange > 0 && oiChange < 0) return '#81c784'; // Short Covering
-    return '#f48fb1'; // Long Unwinding
-  }
-
-  getDepthQuality(avgSize: number, orderCount: number): { label: string; color: string } {
-    if (avgSize > 5000 && orderCount < 5) {
-      return { label: 'Whale', color: '#ff9800' };
-    } else if (avgSize < 100 && orderCount > 50) {
-      return { label: 'Retail', color: '#42a5f5' };
-    }
-    return { label: 'Normal', color: '#ffffff' };
-  }
-
-  getLiquidityFlip(buyPressure: number, prevPressure: number): boolean {
-    return (prevPressure > 0.7 && buyPressure < 0.3) || (prevPressure < 0.3 && buyPressure > 0.7);
-  }
-
-  getVolumeAnomalyStatus(volume: number, expectedVolume: number): boolean {
-    return volume > expectedVolume * 2;
+  /**
+   * Classify F&O position state from price/OI change combination.
+   * Useful for highlighting candles. Currently exposed for callers but not
+   * wired into the candle border rendering (lightweight-charts v5 lacks
+   * per-candle border color override).
+   */
+  static classifyPositionState(priceChange: number, oiChange: number): 'long-buildup' | 'short-buildup' | 'short-covering' | 'long-unwinding' {
+    if (priceChange > 0 && oiChange > 0) return 'long-buildup';
+    if (priceChange < 0 && oiChange > 0) return 'short-buildup';
+    if (priceChange > 0 && oiChange < 0) return 'short-covering';
+    return 'long-unwinding';
   }
 }

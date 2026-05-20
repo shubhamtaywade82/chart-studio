@@ -23,6 +23,13 @@ import type { ActiveIndicator } from './indicators/registry';
 import { AnalyticsRenderer, type AnalyticsState } from './chart/analytics';
 import { AlertSystem } from './chart/alerts';
 import { LatencyMonitor, DepthHeatmap, VolumeProfilePanel } from './chart/market-monitor';
+import { AIOverlayManager, type AISignal as AISignalUI, type AILevel as AILevelUI, type TradeSetup as TradeSetupUI, type Urgency } from './chart/ai-overlay';
+
+interface AIAnnotationData {
+  kind: string;
+  ts: number;
+  data: unknown;
+}
 
 export class ChartView {
   private chart: IChartApi;
@@ -44,6 +51,7 @@ export class ChartView {
   private latencyMonitor: LatencyMonitor;
   private depthHeatmap: DepthHeatmap;
   private volumeProfile: VolumeProfilePanel;
+  private aiOverlay: AIOverlayManager;
   private alertListeners = new Set<(alerts: any[]) => void>();
 
   constructor(container: HTMLElement) {
@@ -131,7 +139,10 @@ export class ChartView {
     this.chart.timeScale().subscribeVisibleLogicalRangeChange((r) => this.handleRangeChange(r));
 
     this.analytics = new AnalyticsRenderer(this.chart, this.series);
-    this.analytics.setupSeries();
+    // Panes 1/2 are reserved for CVD/OI. Indicator sub-panes (RSI/MACD)
+    // start at index 3 to avoid colliding with these.
+    this.analytics.setupSeries(1, 2);
+    this.indicatorBasePane = 3;
 
     this.alertSystem = new AlertSystem();
     this.alertSystem.onAlertsChange((alerts) => {
@@ -141,13 +152,97 @@ export class ChartView {
     this.latencyMonitor = new LatencyMonitor();
     this.depthHeatmap = new DepthHeatmap();
     this.volumeProfile = new VolumeProfilePanel();
+    this.aiOverlay = new AIOverlayManager(this.chart, this.series, container);
   }
+
+  /** Day open ms timestamp used to extrapolate expected volume. */
+  private dayOpenMs = 0;
+  private indicatorBasePane = 3;
 
   setSymbol(symbol: string): void {
     this.watermark?.applyOptions({
       lines: [{ text: symbol.toUpperCase(), color: 'rgba(255, 255, 255, 0.03)', fontSize: 48 }],
     });
+    // Reset all analytics tick-state so a new symbol doesn't inherit deltas
+    // from the previous one.
+    this.analytics?.reset();
+    this.alertSystem.reset();
+    this.latencyMonitor.reset();
+    this.volumeProfile.reset();
+    this.aiOverlay.reset();
+    this.dayOpenMs = 0;
   }
+
+  // ── AI overlay wiring ───────────────────────────────────────────────
+
+  applyAISignal(sig: AISignalUI): void {
+    if (sig.urgency === 'immediate' || sig.urgency === 'critical') {
+      this.aiOverlay.applyNarrative(`[${sig.type.toUpperCase()}] ${sig.narrative}`, sig.urgency as Urgency);
+    }
+  }
+
+  applyAIAnnotation(ann: AIAnnotationData): void {
+    if (!ann || !ann.kind) return;
+    switch (ann.kind) {
+      case 'tactical': {
+        const data = ann.data as { regime?: string; levels?: AILevelUI[]; setup?: TradeSetupUI; divergences?: Array<{ type: string; strength: number; description: string }>; narrative?: string; urgency?: Urgency };
+        if (data.regime) this.aiOverlay.applyRegime(data.regime);
+        if (data.levels) this.aiOverlay.applyLevels(data.levels);
+        if (data.setup) this.aiOverlay.applySetup(data.setup);
+        if (data.divergences) this.aiOverlay.applyDivergences(data.divergences);
+        if (data.narrative) this.aiOverlay.applyNarrative(data.narrative, data.urgency ?? 'watch_only');
+        break;
+      }
+      case 'reflex': {
+        const data = ann.data as { regime?: string; toxicity?: number; depthImbalance?: number; derived?: { volatilityRegime?: string; toxicity?: number; cvd?: number } };
+        const reg = data.regime ?? data.derived?.volatilityRegime;
+        if (reg) this.aiOverlay.applyRegime(reg);
+        const tox = data.toxicity ?? data.derived?.toxicity;
+        if (typeof tox === 'number') this.aiOverlay.applyToxicity(tox);
+
+        // OI matrix from derived (uses price delta vs prev close inferred locally).
+        const last = this.candles[this.candles.length - 1];
+        const prevClose = this.candles[Math.max(0, this.candles.length - 2)]?.close ?? 0;
+        if (last && prevClose > 0) {
+          const priceChange = last.close - prevClose;
+          // OI change is in data.derived if we had it; pulled from prior tactical.
+          this.aiOverlay.applyOiMatrix(priceChange, this.lastOiChange);
+        }
+        break;
+      }
+      case 'narrative': {
+        const data = ann.data as { text?: string; urgency?: Urgency };
+        if (data.text) this.aiOverlay.applyNarrative(data.text, data.urgency ?? 'watch_only');
+        break;
+      }
+      case 'risk': {
+        const data = ann.data as { status?: 'all_clear' | 'yellow' | 'red'; reason?: string };
+        this.aiOverlay.applyRisk(data.status ?? 'all_clear', data.reason ?? '');
+        break;
+      }
+      case 'historical_echo': {
+        const data = ann.data as { matches?: number; bullishCount?: number };
+        this.aiOverlay.applyHistoricalEcho(data.matches ?? 0, data.bullishCount ?? 0);
+        break;
+      }
+      case 'confluence': {
+        const data = ann.data as { badges?: Array<{ tf: string; signal: 'bullish' | 'bearish' | 'neutral' }> };
+        if (data.badges) this.aiOverlay.applyConfluence(data.badges);
+        break;
+      }
+      case 'correlation': {
+        const data = ann.data as { pairs?: Array<{ a: string; b: string; correlation: number }> };
+        if (data.pairs) this.aiOverlay.applyCorrelation(data.pairs);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  /** Cache last OI change from tactical layer for use by reflex OI matrix render. */
+  private lastOiChange = 0;
+  setLastOiChange(v: number): void { this.lastOiChange = v; }
 
   setIntervalMs(ms: number): void {
     this.intervalMs = ms;
@@ -262,12 +357,22 @@ export class ChartView {
     volume: number; totalBuyQty: number; totalSellQty: number;
     oi: number | undefined; highOi: number | undefined; lowOi: number | undefined;
     dayOpen: number; dayHigh: number; dayLow: number; dayClose: number;
-    bidOrders: number[] | undefined; askOrders: number[] | undefined;
+    depthBids: Array<{ price: number; qty: number; orders: number }> | undefined;
+    depthAsks: Array<{ price: number; qty: number; orders: number }> | undefined;
     prevClose: number | undefined; prevOi: number | undefined;
   }): void {
     if (!this.analytics) return;
     const last = this.candles[this.candles.length - 1];
     if (!last) return;
+
+    // Lazily anchor dayOpenMs to the FIRST tick that carries a valid dayOpen,
+    // so expectedVolume extrapolates over real session time, not candle age.
+    if (this.dayOpenMs === 0 && data.dayOpen > 0) {
+      const now = new Date();
+      const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+      ist.setHours(9, 15, 0, 0);
+      this.dayOpenMs = ist.getTime();
+    }
 
     const state: AnalyticsState = {
       ltp: data.ltp,
@@ -284,24 +389,31 @@ export class ChartView {
       dayClose: data.dayClose,
       prevClose: data.prevClose,
       prevOi: data.prevOi,
-      bidOrders: data.bidOrders,
-      askOrders: data.askOrders,
+      bidOrders: data.depthBids?.map((b) => b.orders),
+      askOrders: data.depthAsks?.map((a) => a.orders),
       ltq: data.ltq,
       ltt: data.ltt,
       time: (last.openTime / 1000) as UTCTimestamp,
     };
 
     this.analytics.update(state);
-    this.depthHeatmap.update(data.bidOrders, data.askOrders);
+    this.depthHeatmap.update(data.depthBids, data.depthAsks);
     this.volumeProfile.update(data.ltp, 1 / Math.pow(10, this.getPrecision()), data.ltq);
 
-    // Latency monitoring
-    if (data.ltt > 0) {
-      this.latencyMonitor.recordTick(data.ltt);
-    }
+    if (data.ltt > 0) this.latencyMonitor.recordTick(data.ltt);
 
-    // Alert checking
-    const expectedVolume = (data.volume / (Date.now() / 1000 - (last.openTime / 1000))) * 86400;
+    // Compute alert inputs from REAL depth quantities (not order counts) and
+    // extrapolate expected volume over a 6.5-hour session, not candle age.
+    const bidQtyTotal = data.depthBids?.reduce((a, b) => a + b.qty, 0) ?? 0;
+    const askQtyTotal = data.depthAsks?.reduce((a, b) => a + b.qty, 0) ?? 0;
+    const SESSION_SEC = 6.5 * 3600;
+    let expectedVolume = 0;
+    if (this.dayOpenMs > 0 && data.volume > 0) {
+      const elapsedSec = Math.max(1, (Date.now() - this.dayOpenMs) / 1000);
+      expectedVolume = (data.volume / elapsedSec) * SESSION_SEC;
+    }
+    const tradesPerSec = this.latencyMonitor.getStats().tradesPerSec;
+
     this.alertSystem.check({
       ltp: data.ltp,
       atp: data.atp,
@@ -311,10 +423,9 @@ export class ChartView {
       volume: data.volume,
       totalBuyQty: data.totalBuyQty,
       totalSellQty: data.totalSellQty,
-      bidOrders: data.bidOrders,
-      askOrders: data.askOrders,
-      ltt: data.ltt,
-      ltq: data.ltq,
+      bidQtyTotal,
+      askQtyTotal,
+      tradesPerSec,
       expectedVolume,
     });
   }
@@ -349,7 +460,8 @@ export class ChartView {
 
     const MA_COLORS  = ['#ff9800', '#2196f3', '#9c27b0', '#4caf50'];
     const EMA_COLORS = ['#ff5722', '#03a9f4', '#8bc34a', '#ffc107'];
-    let nextSubPane = 1;
+    // Sub-pane indices start after CVD (1) and OI (2). RSI/MACD go to 3+.
+    let nextSubPane = this.indicatorBasePane;
 
     for (const ind of list) {
       const added: Array<ISeriesApi<'Line'> | ISeriesApi<'Histogram'>> = [];

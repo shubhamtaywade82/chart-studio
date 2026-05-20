@@ -6,41 +6,104 @@ import type { TokenProvider } from './token-provider';
  *
  * Subscribe in JSON, receive binary frames little-endian:
  *   Header (8 bytes): code(1) | length(2) | exchSeg(1) | securityId(4)
- *   Ticker (code 2):     LTP(f32), LTT(i32)
- *   Quote  (code 4):     LTP, LTQ(i16), LTT, ATP, Volume(i32), TSQ, TBQ, Open, Close, High, Low
- *   OI     (code 5):     OI(i32)
- *   PrevClose (code 6):  Close(f32), PrevOi(i32)
- *   Full   (code 8):     LTP, LTQ(i16), LTT, ATP, Vol, TSQ, TBQ, OI, HighOi, LowOi, Open, Close, High, Low, then 5×(bidQty,askQty,bidOrders,askOrders,bidPx,askPx)
- *   Disconnect (code 50): reason(i16)
+ *   Ticker (code 2):     LTP(f32), LTT(i32)                                  [16 bytes]
+ *   Quote  (code 4):     LTP, LTQ(i16), LTT, ATP, Volume(i32), TSQ, TBQ,
+ *                        Open, Close, High, Low                              [50 bytes]
+ *   OI     (code 5):     OI(i32)                                             [12 bytes]
+ *   PrevClose (code 6):  PrevClose(f32), PrevOi(i32)                         [16 bytes]
+ *   Full   (code 8):     LTP, LTQ(i16), LTT, ATP, Vol, TSQ, TBQ, OI, HighOi,
+ *                        LowOi, Open, Close, High, Low,
+ *                        then 5×(bidQty, askQty, bidOrders, askOrders,
+ *                                 bidPx, askPx)                              [162 bytes]
+ *   Disconnect (code 50): reason(i16)                                        [10 bytes]
  *
  * Subscription:
- *   { RequestCode: 15, InstrumentCount: N, InstrumentList: [{ ExchangeSegment, SecurityId }] }
- * RequestCode determines depth mode; 15=Quote, 17=Full, 21=Ticker per Dhan v2.
- * We use 17 by default so we get full top-5 depth + LTP in one stream.
+ *   { RequestCode: 15|17|21, InstrumentCount: N,
+ *     InstrumentList: [{ ExchangeSegment, SecurityId }] }
+ * RequestCode (Dhan v2): 15=Ticker, 17=Quote, 21=Full.
+ * We use 21 by default so we get full top-5 depth + OI + LTP in one stream.
  */
 
 const FEED_BASE = 'wss://api-feed.dhan.co';
-// Request codes per Dhan v2 docs: 15=Quote, 17=Full, 21=Ticker.
-const REQ_TICKER = 21;
-const REQ_QUOTE  = 15;
-const REQ_FULL   = 17;
+// Request codes (Dhan v2): 15=Ticker, 17=Quote, 21=Full.
+const REQ_TICKER = 15;
+const REQ_QUOTE  = 17;
+const REQ_FULL   = 21;
 const REQ_DISCONNECT = 12;
 
-// Maps the numeric exchangeSegment byte in binary frames to the string segment
-// used as subscription key (matches DhanInstrument.exchangeSegment).
-const SEGMENT_MAP: Record<number, string> = {
-  1: 'NSE_EQ', 2: 'NSE_FNO', 3: 'NSE_CURRENCY', 4: 'NSE_COMMODITY',
-  8: 'BSE_EQ', 9: 'BSE_FNO', 10: 'MCX_COMM', 11: 'BSE_CURRENCY',
+// Response codes (Dhan v2): byte 0 of every frame.
+const RESP_TICKER     = 2;
+const RESP_QUOTE      = 4;
+const RESP_OI         = 5;
+const RESP_PREV_CLOSE = 6;
+const RESP_FULL       = 8;
+const RESP_DISCONNECT = 50;
+
+/**
+ * Dhan v2 Exchange Segment enums (byte 4 of each frame's 8-byte header).
+ * Verified against https://dhanhq.co/docs/v2/annexure-codes/.
+ */
+export const ExchangeSegment = {
+  IDX_I:        0, // Index value
+  NSE_EQ:       1, // NSE Equity Cash
+  NSE_FNO:      2, // NSE Futures & Options
+  NSE_CURRENCY: 3, // NSE Currency
+  BSE_EQ:       4, // BSE Equity Cash
+  MCX_COMM:     5, // MCX Commodity
+  BSE_CURRENCY: 7, // BSE Currency
+  BSE_FNO:      8, // BSE Futures & Options
+} as const;
+
+export type ExchangeSegmentCode = typeof ExchangeSegment[keyof typeof ExchangeSegment];
+
+const SEGMENT_CODE_TO_STRING: Record<number, string> = {
+  [ExchangeSegment.IDX_I]:        'IDX_I',
+  [ExchangeSegment.NSE_EQ]:       'NSE_EQ',
+  [ExchangeSegment.NSE_FNO]:      'NSE_FNO',
+  [ExchangeSegment.NSE_CURRENCY]: 'NSE_CURRENCY',
+  [ExchangeSegment.BSE_EQ]:       'BSE_EQ',
+  [ExchangeSegment.MCX_COMM]:     'MCX_COMM',
+  [ExchangeSegment.BSE_CURRENCY]: 'BSE_CURRENCY',
+  [ExchangeSegment.BSE_FNO]:      'BSE_FNO',
 };
 
+export const SEGMENT_STRING_TO_CODE: Record<string, number> = {
+  IDX_I:        ExchangeSegment.IDX_I,
+  NSE_EQ:       ExchangeSegment.NSE_EQ,
+  NSE_FNO:      ExchangeSegment.NSE_FNO,
+  NSE_CURRENCY: ExchangeSegment.NSE_CURRENCY,
+  BSE_EQ:       ExchangeSegment.BSE_EQ,
+  MCX_COMM:     ExchangeSegment.MCX_COMM,
+  BSE_CURRENCY: ExchangeSegment.BSE_CURRENCY,
+  BSE_FNO:      ExchangeSegment.BSE_FNO,
+};
+
+export const resolveSegmentCode = (segment: string): number => {
+  const code = SEGMENT_STRING_TO_CODE[segment.toUpperCase()];
+  if (code === undefined) {
+    throw new Error(`Unknown exchange segment: ${segment}. Valid: ${Object.keys(SEGMENT_STRING_TO_CODE).join(', ')}`);
+  }
+  return code;
+};
+
+export const resolveSegmentString = (code: number): string =>
+  SEGMENT_CODE_TO_STRING[code] ?? `UNKNOWN_${code}`;
+
 export interface DhanTick {
+  /** Raw exchange segment byte from header (0..8). */
+  exchangeSegmentCode: number;
+  /** String form ('NSE_EQ', 'IDX_I', etc.) resolved from the code. */
+  exchangeSegmentString: string;
+  /** Backwards-compat: numeric code. Prefer exchangeSegmentString for keys. */
   exchangeSegment: number;
   securityId: number;
-  /** ms */
+  /** Local receive timestamp (ms). */
   ts: number;
+  /** Response code (RESP_TICKER=2, RESP_QUOTE=4, RESP_OI=5, RESP_PREV_CLOSE=6, RESP_FULL=8, RESP_DISCONNECT=50). */
   code: number;
   ltp?: number;
   ltq?: number;
+  /** Epoch seconds (NOT ms). */
   ltt?: number;
   atp?: number;
   volume?: number;
@@ -51,19 +114,23 @@ export interface DhanTick {
   high?: number;
   low?: number;
   openInterest?: number;
+  /** NSE_FNO only (day high OI). */
   highOi?: number;
+  /** NSE_FNO only (day low OI). */
   lowOi?: number;
   /** 5-level depth with [price, qty, orders] per side. */
   bids?: Array<[number, number, number]>;
   asks?: Array<[number, number, number]>;
-  /** Order count per bid level */
+  /** Order count per bid level (also surfaced separately for heatmaps). */
   bidOrders?: number[];
-  /** Order count per ask level */
+  /** Order count per ask level. */
   askOrders?: number[];
-  /** Prev close (from code 6) */
+  /** Prev close (from code 6). */
   prevClose?: number;
-  /** Prev OI (from code 6) */
+  /** Prev OI (from code 6). */
   prevOi?: number;
+  /** Reason code from disconnect frame (code 50). */
+  disconnectReason?: number;
 }
 
 export interface DhanSubscription {
@@ -82,69 +149,85 @@ interface InternalSub {
 const parseTick = (buf: Buffer): DhanTick | null => {
   if (buf.length < 8) return null;
   const code = buf.readUInt8(0);
-  const exchSeg = buf.readUInt8(3);
+  // bytes 1-2: message length (skipped)
+  const exchangeSegmentCode = buf.readUInt8(3);
   const securityId = buf.readInt32LE(4);
-  const t: DhanTick = { exchangeSegment: exchSeg, securityId, ts: Date.now(), code };
-  if (code === 2 && buf.length >= 16) {
-    t.ltp = buf.readFloatLE(8);
-    t.ltt = buf.readInt32LE(12);
+  const exchangeSegmentString = resolveSegmentString(exchangeSegmentCode);
+  const t: DhanTick = {
+    exchangeSegmentCode,
+    exchangeSegmentString,
+    exchangeSegment: exchangeSegmentCode,
+    securityId,
+    ts: Date.now(),
+    code,
+  };
+
+  if (code === RESP_TICKER && buf.length >= 16) {
+    let p = 8;
+    t.ltp = buf.readFloatLE(p); p += 4;
+    t.ltt = buf.readInt32LE(p);
     return t;
   }
-  if (code === 4 && buf.length >= 50) {
-    t.ltp = buf.readFloatLE(8);
-    t.ltq = buf.readInt16LE(12);
-    t.ltt = buf.readInt32LE(14);
-    t.atp = buf.readFloatLE(18);
-    t.volume = buf.readInt32LE(22);
-    t.totalSellQty = buf.readInt32LE(26);
-    t.totalBuyQty = buf.readInt32LE(30);
-    t.open = buf.readFloatLE(34);
-    t.close = buf.readFloatLE(38);
-    t.high = buf.readFloatLE(42);
-    t.low = buf.readFloatLE(46);
+
+  if (code === RESP_QUOTE && buf.length >= 50) {
+    let p = 8;
+    t.ltp          = buf.readFloatLE(p); p += 4;
+    t.ltq          = buf.readInt16LE(p); p += 2;
+    t.ltt          = buf.readInt32LE(p); p += 4;
+    t.atp          = buf.readFloatLE(p); p += 4;
+    t.volume       = buf.readInt32LE(p); p += 4;
+    t.totalSellQty = buf.readInt32LE(p); p += 4;
+    t.totalBuyQty  = buf.readInt32LE(p); p += 4;
+    t.open         = buf.readFloatLE(p); p += 4;
+    t.close        = buf.readFloatLE(p); p += 4;
+    t.high         = buf.readFloatLE(p); p += 4;
+    t.low          = buf.readFloatLE(p);
     return t;
   }
-  if (code === 5 && buf.length >= 12) {
+
+  if (code === RESP_OI && buf.length >= 12) {
     t.openInterest = buf.readInt32LE(8);
     return t;
   }
-  if (code === 6 && buf.length >= 16) {
+
+  if (code === RESP_PREV_CLOSE && buf.length >= 16) {
     t.prevClose = buf.readFloatLE(8);
-    t.prevOi = buf.readInt32LE(12);
+    t.prevOi    = buf.readInt32LE(12);
     return t;
   }
-  if (code === 8 && buf.length >= 162) {
-    t.ltp = buf.readFloatLE(8);
-    t.ltq = buf.readInt16LE(12);
-    t.ltt = buf.readInt32LE(14);
-    t.atp = buf.readFloatLE(18);
-    t.volume = buf.readInt32LE(22);
-    t.totalSellQty = buf.readInt32LE(26);
-    t.totalBuyQty = buf.readInt32LE(30);
-    t.openInterest = buf.readInt32LE(34);
-    t.highOi = buf.readInt32LE(38);
-    t.lowOi = buf.readInt32LE(42);
-    t.open = buf.readFloatLE(46);
-    t.close = buf.readFloatLE(50);
-    t.high = buf.readFloatLE(54);
-    t.low = buf.readFloatLE(58);
+
+  if (code === RESP_FULL && buf.length >= 162) {
+    let p = 8;
+    t.ltp          = buf.readFloatLE(p); p += 4;
+    t.ltq          = buf.readInt16LE(p); p += 2;
+    t.ltt          = buf.readInt32LE(p); p += 4;
+    t.atp          = buf.readFloatLE(p); p += 4;
+    t.volume       = buf.readInt32LE(p); p += 4;
+    t.totalSellQty = buf.readInt32LE(p); p += 4;
+    t.totalBuyQty  = buf.readInt32LE(p); p += 4;
+    t.openInterest = buf.readInt32LE(p); p += 4;
+    t.highOi       = buf.readInt32LE(p); p += 4;
+    t.lowOi        = buf.readInt32LE(p); p += 4;
+    t.open         = buf.readFloatLE(p); p += 4;
+    t.close        = buf.readFloatLE(p); p += 4;
+    t.high         = buf.readFloatLE(p); p += 4;
+    t.low          = buf.readFloatLE(p); p += 4;
+
     const bids: Array<[number, number, number]> = [];
     const asks: Array<[number, number, number]> = [];
     const bidOrders: number[] = [];
     const askOrders: number[] = [];
-    let off = 62;
     for (let i = 0; i < 5; i += 1) {
-      const bidQty = buf.readInt32LE(off);
-      const askQty = buf.readInt32LE(off + 4);
-      const bidOrd = buf.readInt16LE(off + 8);
-      const askOrd = buf.readInt16LE(off + 10);
-      const bidPx = buf.readFloatLE(off + 12);
-      const askPx = buf.readFloatLE(off + 16);
+      const bidQty = buf.readInt32LE(p);     p += 4;
+      const askQty = buf.readInt32LE(p);     p += 4;
+      const bidOrd = buf.readInt16LE(p);     p += 2;
+      const askOrd = buf.readInt16LE(p);     p += 2;
+      const bidPx  = buf.readFloatLE(p);     p += 4;
+      const askPx  = buf.readFloatLE(p);     p += 4;
       bids.push([bidPx, bidQty, bidOrd]);
       asks.push([askPx, askQty, askOrd]);
       bidOrders.push(bidOrd);
       askOrders.push(askOrd);
-      off += 20;
     }
     t.bids = bids;
     t.asks = asks;
@@ -152,6 +235,12 @@ const parseTick = (buf: Buffer): DhanTick | null => {
     t.askOrders = askOrders;
     return t;
   }
+
+  if (code === RESP_DISCONNECT && buf.length >= 10) {
+    t.disconnectReason = buf.readInt16LE(8);
+    return t;
+  }
+
   return null;
 };
 
@@ -162,6 +251,8 @@ export class DhanStreamPool {
   private reconnectAttempts = 0;
   private closed = false;
   private mode: number;
+  /** Throttle for unmatched-tick warnings. */
+  private unmatchedWarned = 0;
 
   constructor(private readonly tokens: TokenProvider, mode: 'ticker' | 'quote' | 'full' = 'full') {
     this.mode = mode === 'ticker' ? REQ_TICKER : mode === 'quote' ? REQ_QUOTE : REQ_FULL;
@@ -236,12 +327,28 @@ export class DhanStreamPool {
       if (!(raw instanceof Buffer)) return;
       const tick = parseTick(raw);
       if (!tick) return;
-      const segStr = SEGMENT_MAP[tick.exchangeSegment];
-      if (!segStr) return;
+
+      // Disconnect frames are not symbol-routed; just log the reason.
+      if (tick.code === RESP_DISCONNECT) {
+        console.warn(`[adapter-dhanhq] server disconnect, reason=${tick.disconnectReason}`);
+        return;
+      }
+
+      const segStr = tick.exchangeSegmentString;
+      if (!segStr || segStr.startsWith('UNKNOWN_')) {
+        if (this.unmatchedWarned < 5) {
+          this.unmatchedWarned += 1;
+          console.warn(`[adapter-dhanhq] unknown segment code ${tick.exchangeSegmentCode} for securityId=${tick.securityId}`);
+        }
+        return;
+      }
       const key = `${segStr}:${tick.securityId}`;
       const entry = this.subs.get(key);
       if (entry) {
         for (const fn of entry.fns) fn(tick);
+      } else if (this.unmatchedWarned < 5) {
+        this.unmatchedWarned += 1;
+        console.warn(`[adapter-dhanhq] unmatched tick segment=${segStr} secId=${tick.securityId} (active keys: ${[...this.subs.keys()].slice(0, 5).join(',')})`);
       }
     });
 

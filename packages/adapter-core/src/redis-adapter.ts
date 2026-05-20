@@ -164,6 +164,11 @@ export class RedisAdapter {
       case 'analytics':
         unsub = (this.provider as any).streamAnalytics?.(msg.symbol, (d: unknown) => publish(d)) ?? (() => undefined);
         break;
+      case 'signal':
+      case 'annotation':
+        // Produced by the ai-engine microservice; data providers ignore these.
+        unsub = () => undefined;
+        break;
     }
     return { unsub, refs: 1 };
   }
@@ -181,6 +186,8 @@ export class RedisAdapter {
         case 'trade':
         case 'ticker':
         case 'analytics':
+        case 'signal':
+        case 'annotation':
           // No REST snapshot — only live ticks.
           return;
       }
