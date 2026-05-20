@@ -65,6 +65,43 @@ export const fetchKlines = async (
   return out;
 };
 
+export interface Ticker24hr {
+  open: number; high: number; low: number; lastPrice: number;
+  weightedAvgPrice: number; volume: number; lastQty: number;
+  prevClosePrice: number | undefined; closeTime: number;
+}
+
+export const fetchTicker24hr = async (cfg: BinanceConfig, symbol: string): Promise<Ticker24hr | null> => {
+  const path = cfg.product === 'spot' ? '/api/v3/ticker/24hr' : '/fapi/v1/ticker/24hr';
+  const url = `${restBaseFor(cfg)}${path}`;
+  try {
+    const { data } = await axios.get<Record<string, unknown>>(url, {
+      params: { symbol: symbol.toUpperCase() }, timeout: 10_000, validateStatus: (s) => s === 200,
+    });
+    const num = (k: string): number => Number(data[k]);
+    const out: Ticker24hr = {
+      open: num('openPrice'), high: num('highPrice'), low: num('lowPrice'),
+      lastPrice: num('lastPrice'), weightedAvgPrice: num('weightedAvgPrice'),
+      volume: num('volume'), lastQty: num('lastQty'),
+      prevClosePrice: Number.isFinite(num('prevClosePrice')) && num('prevClosePrice') > 0 ? num('prevClosePrice') : undefined,
+      closeTime: num('closeTime'),
+    };
+    return out;
+  } catch { return null; }
+};
+
+export const fetchOpenInterest = async (cfg: BinanceConfig, symbol: string): Promise<number | null> => {
+  if (cfg.product === 'spot') return null;
+  const url = `${restBaseFor(cfg)}/fapi/v1/openInterest`;
+  try {
+    const { data } = await axios.get<{ openInterest: string }>(url, {
+      params: { symbol: symbol.toUpperCase() }, timeout: 10_000, validateStatus: (s) => s === 200,
+    });
+    const v = Number(data.openInterest);
+    return Number.isFinite(v) ? v : null;
+  } catch { return null; }
+};
+
 export const fetchDepthSnapshot = async (
   cfg: BinanceConfig,
   symbol: string,

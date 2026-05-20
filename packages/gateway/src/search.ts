@@ -14,8 +14,7 @@ export const federatedSearchSymbols = async (
   const providers = bridge.snapshotPresence().filter((p) => p.online);
   if (providers.length === 0) return [];
 
-  // Request a larger batch from adapters so we can rank the best matches
-  // across segments (e.g. to ensure Cash/Equity isn't buried by F&O strikes).
+  // Request a larger batch from adapters to allow for cross-segment ranking.
   const internalLimit = Math.max(limit * 5, 100);
 
   const results = await Promise.all(
@@ -28,49 +27,69 @@ export const federatedSearchSymbols = async (
     for (const item of list) merged.push(item);
   }
 
-  // Sort: exact symbol or label match first, then prefix, then substring.
+  // Sort strictly by segment hierarchy first, then by match quality score.
   const q = query.trim().toUpperCase();
-  merged.sort((a, b) => score(b, q) - score(a, q));
+  merged.sort((a, b) => {
+    const tierA = getSegmentTier(a);
+    const tierB = getSegmentTier(b);
+    
+    // Lower tier number = higher priority
+    if (tierA !== tierB) return tierA - tierB;
+    
+    // Within the same tier, sort by match quality score
+    return scoreMatchQuality(b, q) - scoreMatchQuality(a, q);
+  });
+
   return merged.slice(0, limit);
 };
 
-const score = (ref: SymbolRef, q: string): number => {
+/**
+ * Returns a numerical tier for strict grouping.
+ * 1: Indices (IDX_I)
+ * 2: Equity/Spot (NSE_EQ, BSE_EQ, Binance Spot)
+ * 3: F&O/Futures (NSE_FNO, BSE_FNO, Binance USD-M)
+ * 4: Commodity (MCX)
+ * 5: Options
+ * 6: Others
+ */
+const getSegmentTier = (ref: SymbolRef): number => {
+  const s = (ref.symbol || '').toUpperCase();
+  const seg = (ref.segment || '').toLowerCase();
+  const prov = (ref.provider || '').toLowerCase();
+
+  // 1. Indices
+  if (s.startsWith('IDX_I:') || seg === 'index') return 1;
+
+  // 2. Equity/Spot
+  if (s.startsWith('NSE_EQ:') || s.startsWith('BSE_EQ:') || seg === 'equity' || (prov.includes('binance') && seg === 'spot')) return 2;
+
+  // 3. F&O/Futures
+  if (s.startsWith('NSE_FNO:') || s.startsWith('BSE_FNO:') || seg === 'futures' || (prov.includes('binance') && seg === 'futures')) {
+    // Distinguish between futures and options if possible
+    if (seg === 'option' || s.includes(' CALL') || s.includes(' PUT') || / \d{4} [CP]E$/.test(s)) return 5;
+    return 3;
+  }
+
+  // 4. Commodity
+  if (s.startsWith('MCX_COMM:') || seg === 'commodity') return 4;
+
+  // 5. Options (explicitly caught if not in FNO bucket)
+  if (seg === 'option') return 5;
+
+  return 6;
+};
+
+const scoreMatchQuality = (ref: SymbolRef, q: string): number => {
   if (!q) return 0;
   const s = ref.symbol.toUpperCase();
   const l = (ref.label || '').toUpperCase();
   
-  let points = 0;
-
-  // 1. MATCH QUALITY (The foundation)
-  if (s === q || l === q) points += 1000;
-  else if (s.startsWith(q) || l.startsWith(q)) points += 500;
-  else if (l.split(/\s+/).some(word => word.startsWith(q))) points += 400;
-  else if (s.includes(q) || l.includes(q)) points += 100;
-
-  if (points === 0) return 0;
-
-  // 2. HIERARCHY RANKING (Tie-breaker within the same match quality)
-  // Order: IDX_I -> NSE/BSE_EQ -> NSE/BSE_FNO -> MCX -> MCX_FNO
-  const sUpper = s.toUpperCase();
+  if (s === q || l === q) return 1000;
+  if (s.startsWith(q) || l.startsWith(q)) return 500;
+  if (l.split(/\s+/).some(word => word.startsWith(q))) return 400;
+  if (s.includes(q) || l.includes(q)) return 100;
   
-  // High-level segment prioritization
-  if (sUpper.startsWith('IDX_I:') || ref.segment === 'index') {
-    points += 90;
-  } else if (sUpper.startsWith('NSE_EQ:') || sUpper.startsWith('BSE_EQ:') || ref.segment === 'equity' || ref.segment === 'spot') {
-    points += 80;
-  } else if (sUpper.startsWith('NSE_FNO:') || sUpper.startsWith('BSE_FNO:') || ref.segment === 'futures') {
-    points += 70;
-  } else if (sUpper.startsWith('MCX_COMM:') || ref.segment === 'commodity') {
-    // Note: MCX_COMM is used for both cash and futures in some Dhan segments
-    points += 60;
-  } else if (ref.segment === 'option') {
-    points += 50;
-  }
-
-  // Slight preference for NSE over BSE when both exist
-  if (sUpper.startsWith('NSE_')) points += 2;
-
-  return points;
+  return 0;
 };
 
 export const federatedListSymbols = async (
