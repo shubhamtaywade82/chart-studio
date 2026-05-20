@@ -155,7 +155,7 @@ export class ProviderClient {
     return this.subscribe({ provider, symbol, channel: 'candle', interval }, onSnapshot, onUpdate);
   }
 
-  streamDepth(provider: string, symbol: string, onSnapshot: (s: OrderBookSnapshot) => void, onUpdate: (d: DepthDelta) => void): () => void {
+  streamDepth(provider: string, symbol: string, onSnapshot: (s: OrderBookSnapshot | null) => void, onUpdate: (d: DepthDelta) => void): () => void {
     return this.subscribe({ provider, symbol, channel: 'depth' }, onSnapshot, onUpdate);
   }
 

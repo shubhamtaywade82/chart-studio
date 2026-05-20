@@ -32,9 +32,24 @@ export interface AlgoScalperResponse {
   clientId?: string;
   access_token?: string;
   accessToken?: string;
+  dhan_access_token?: string;
+  dhanaccesstoken?: string;
   /** Unix ms or seconds; we accept either. */
   expires_at?: number;
   expiresAt?: number;
+  expiry_time?: string;
+}
+
+function extractClientIdFromJwt(token: string): string | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3 || !parts[1]) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
+    return payload.dhanClientId ?? payload.clientId ?? payload.client_id ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -84,12 +99,21 @@ export class AlgoScalperTokenProvider implements TokenProvider {
     this.inflight = (async () => {
       try {
         const { data } = await this.http.get<AlgoScalperResponse>(this.url);
-        const clientId = data.client_id ?? data.clientId;
-        const accessToken = data.access_token ?? data.accessToken;
+        const accessToken = data.access_token ?? data.accessToken ?? data.dhan_access_token ?? data.dhanaccesstoken;
+        let clientId = data.client_id ?? data.clientId ?? (process.env.DHAN_CLIENT_ID || '');
+        if (!clientId && accessToken) {
+          clientId = extractClientIdFromJwt(accessToken) || '';
+        }
         if (!clientId || !accessToken) throw new Error('algo_scalper_api response missing client_id / access_token');
+
         let expiresAt = data.expires_at ?? data.expiresAt;
+        if (!expiresAt && data.expiry_time) {
+          const parsed = Date.parse(data.expiry_time);
+          if (!isNaN(parsed)) expiresAt = parsed;
+        }
         // Accept seconds or ms; assume seconds if < 1e12.
         if (typeof expiresAt === 'number' && expiresAt > 0 && expiresAt < 1e12) expiresAt *= 1000;
+
         const creds: DhanCreds = { clientId, accessToken };
         const safeExpiry = typeof expiresAt === 'number' && expiresAt > Date.now() ? expiresAt : Date.now() + (this.opts.minRefreshMs ?? 5 * 60_000);
         this.cached = { creds, expiresAt: safeExpiry };
