@@ -151,6 +151,41 @@ const main = async (): Promise<void> => {
       return;
     }
 
+    // ── On-Chain Smart Money Signals ─────────────────────────────────────
+    if (url.pathname === '/signals/smart-money') {
+      const chainId = url.searchParams.get('chainId') ?? 'CT_501';
+      const page = Number(url.searchParams.get('page') ?? '1');
+      const pageSize = Number(url.searchParams.get('pageSize') ?? '50');
+
+      fetch('https://web3.binance.com/bapi/defi/v1/public/wallet-direct/buw/wallet/web/signal/smart-money/ai', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept-Encoding': 'identity',
+          'User-Agent': 'binance-web3/1.1 (Skill)'
+        },
+        body: JSON.stringify({
+          smartSignalType: '',
+          page,
+          pageSize,
+          chainId
+        })
+      })
+      .then(async (apiRes) => {
+        if (!apiRes.ok) {
+          throw new Error(`Binance Web3 API responded with status ${apiRes.status}`);
+        }
+        const data = await apiRes.json();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(data));
+      })
+      .catch((err) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      });
+      return;
+    }
+
     res.writeHead(404).end('not found');
   });
 

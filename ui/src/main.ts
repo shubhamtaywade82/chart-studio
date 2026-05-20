@@ -15,6 +15,7 @@ import { DrawingLayer, type DrawingTool } from './drawings/drawings';
 import { INDICATORS, type ActiveIndicator } from './indicators/registry';
 import { AIBriefPanel } from './panels/ai-brief';
 import { StrategySignalsPanel } from './panels/strategy-signals';
+import { SmartSignalsPanel } from './panels/smart-signals';
 
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
@@ -76,6 +77,7 @@ const main = (): void => {
   const drawings = new DrawingLayer(chart, chartContainer);
   const aiBrief = new AIBriefPanel();
   const strategySignals = new StrategySignalsPanel(client);
+  const smartSignals = new SmartSignalsPanel();
 
   let activeState: AppState | null = parseHash();
   let currentCandles: Candle[] = [];

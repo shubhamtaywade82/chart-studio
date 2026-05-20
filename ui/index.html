@@ -126,6 +126,7 @@
           <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="insights">Insights</button>
           <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="alerts">Alerts</button>
           <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="scripts">Scripts</button>
+          <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="smart-signals">Smart Money</button>
         </nav>
         <div class="sidebar-tab-panels">
           <!-- Live: Sentiment + Microstructure + Order Book -->
@@ -258,6 +259,29 @@
                   <span class="mono-sm dim">NanoPine v1</span>
                 </div>
                 <div id="nanopine-host" class="nanopine-host"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Smart Money Signals -->
+          <div class="sidebar-tab-pane" role="tabpanel" data-tab-pane="smart-signals" aria-hidden="true">
+            <div class="sidebar-signals-stack">
+              <div class="panel sidebar-inner-panel" id="smart-signals-panel">
+                <div class="panel-header">
+                  <h2 class="panel-title">Smart Money Signals</h2>
+                  <div class="signals-header-controls">
+                    <select id="smart-signals-chain" class="chart-settings-btn">
+                      <option value="CT_501">Solana</option>
+                      <option value="56">BSC</option>
+                    </select>
+                    <button id="smart-signals-refresh" class="icon-btn icon-btn-sm" title="Refresh signals">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                    </button>
+                  </div>
+                </div>
+                <div id="smart-signals-list" class="smart-signals-list">
+                  <div class="loading-state">Loading signals...</div>
+                </div>
               </div>
             </div>
           </div>
