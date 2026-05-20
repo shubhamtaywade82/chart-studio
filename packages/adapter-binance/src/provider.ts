@@ -287,7 +287,14 @@ export class BinanceProvider implements MarketDataProvider {
             state.ltt = t.closeTime || Date.now();
           }
           if (Number.isFinite(t.weightedAvgPrice)) state.atp = t.weightedAvgPrice;
-          if (Number.isFinite(t.volume)) state.volume = t.volume;
+          if (Number.isFinite(t.volume)) {
+            // Synthesize ltq from rolling-window volume delta so the vol
+            // profile keeps building even when REST exposes a stale lastQty
+            // (or when fstream aggTrade WS is geo-blocked).
+            const delta = t.volume - state.volume;
+            if (delta > 0 && state.volume > 0) state.ltq = delta;
+            state.volume = t.volume;
+          }
           if (Number.isFinite(t.lastQty) && t.lastQty > 0) state.ltq = t.lastQty;
           if (t.prevClosePrice) state.prevClose = t.prevClosePrice;
         }

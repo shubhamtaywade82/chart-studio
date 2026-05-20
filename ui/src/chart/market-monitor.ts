@@ -1,3 +1,70 @@
+/**
+ * Make a position:absolute floating widget draggable by holding any empty
+ * space (or the explicit `.widget-drag-handle` if added). Drag offset is
+ * persisted in localStorage under `chart-widget-pos:<id>` so the user's layout
+ * survives reloads.
+ */
+function makeDraggable(el: HTMLElement, storageKey: string): void {
+  el.style.cursor = 'move';
+  el.style.userSelect = 'none';
+
+  // Restore saved position.
+  try {
+    const saved = localStorage.getItem(`chart-widget-pos:${storageKey}`);
+    if (saved) {
+      const { left, top } = JSON.parse(saved) as { left: number; top: number };
+      if (Number.isFinite(left) && Number.isFinite(top)) {
+        el.style.left = `${left}px`;
+        el.style.top = `${top}px`;
+        el.style.right = 'auto';
+        el.style.bottom = 'auto';
+      }
+    }
+  } catch { /* ignore */ }
+
+  let dragging = false;
+  let offX = 0, offY = 0;
+  const onDown = (e: PointerEvent): void => {
+    // Allow text selection on inputs etc.
+    const t = e.target as HTMLElement;
+    if (t.closest('input, textarea, select, button')) return;
+    dragging = true;
+    const rect = el.getBoundingClientRect();
+    offX = e.clientX - rect.left;
+    offY = e.clientY - rect.top;
+    el.setPointerCapture(e.pointerId);
+    el.style.zIndex = '200';
+  };
+  const onMove = (e: PointerEvent): void => {
+    if (!dragging) return;
+    const parent = el.parentElement?.getBoundingClientRect();
+    const px = parent?.left ?? 0;
+    const py = parent?.top ?? 0;
+    const left = e.clientX - px - offX;
+    const top = e.clientY - py - offY;
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+    el.style.right = 'auto';
+    el.style.bottom = 'auto';
+  };
+  const onUp = (e: PointerEvent): void => {
+    if (!dragging) return;
+    dragging = false;
+    try { el.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    el.style.zIndex = '100';
+    try {
+      localStorage.setItem(`chart-widget-pos:${storageKey}`, JSON.stringify({
+        left: parseFloat(el.style.left || '0'),
+        top: parseFloat(el.style.top || '0'),
+      }));
+    } catch { /* ignore */ }
+  };
+  el.addEventListener('pointerdown', onDown);
+  el.addEventListener('pointermove', onMove);
+  el.addEventListener('pointerup', onUp);
+  el.addEventListener('pointercancel', onUp);
+}
+
 export class LatencyMonitor {
   private latencies: number[] = [];
   /** Ring buffer of tick arrival timestamps (ms) for tradesPerSec windowing. */
@@ -101,7 +168,7 @@ export class DepthHeatmap {
     if (!this.container) {
       this.container = document.createElement('div');
       this.container.id = 'depth-heatmap-panel';
-      this.container.className = 'depth-heatmap-panel';
+      this.container.className = 'depth-heatmap-panel chart-floating-widget';
       this.container.style.cssText = `
         position: absolute;
         right: 10px;
@@ -116,6 +183,7 @@ export class DepthHeatmap {
       `;
       const parent = document.querySelector('.chart-container') || document.body;
       parent.appendChild(this.container);
+      makeDraggable(this.container, 'depth-heatmap-panel');
     }
     return this.container;
   }
@@ -137,18 +205,22 @@ export class DepthHeatmap {
       const ask = this.asks[i];
       const bidQuality = this.classify(bid);
       const askQuality = this.classify(ask);
-      const bidOrd = bid?.orders ?? 0;
-      const askOrd = ask?.orders ?? 0;
+      // Some venues (e.g. Binance) don't expose distinct-order counts per
+      // level — fall back to the level qty so the panel still shows useful
+      // numbers instead of zeros.
+      const fmtNum = (v: number): string => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(v >= 10 ? 0 : 2);
+      const bidLabel = bid ? (bid.orders > 0 ? String(bid.orders) : fmtNum(bid.qty)) : '0';
+      const askLabel = ask ? (ask.orders > 0 ? String(ask.orders) : fmtNum(ask.qty)) : '0';
 
       html += `
         <div style="text-align: center;">
           <div style="color: #8892a4; font-size: 10px; margin-bottom: 2px;">${cols[i]}</div>
           <div style="background: ${bidQuality.color}22; border: 1px solid ${bidQuality.color}; padding: 4px; border-radius: 2px; margin-bottom: 2px;">
-            <div style="color: ${bidQuality.color}; font-size: 11px; font-weight: bold;">${bidOrd}</div>
+            <div style="color: ${bidQuality.color}; font-size: 11px; font-weight: bold;">${bidLabel}</div>
             <div style="color: rgba(255,255,255,0.5); font-size: 9px;">${bidQuality.label}</div>
           </div>
           <div style="background: ${askQuality.color}22; border: 1px solid ${askQuality.color}; padding: 4px; border-radius: 2px;">
-            <div style="color: ${askQuality.color}; font-size: 11px; font-weight: bold;">${askOrd}</div>
+            <div style="color: ${askQuality.color}; font-size: 11px; font-weight: bold;">${askLabel}</div>
             <div style="color: rgba(255,255,255,0.5); font-size: 9px;">${askQuality.label}</div>
           </div>
         </div>
@@ -159,11 +231,17 @@ export class DepthHeatmap {
   }
 
   private classify(level: DepthLevel | undefined): { label: string; color: string } {
-    if (!level || level.orders <= 0 || level.qty <= 0) return { label: '—', color: '#9c9c9c' };
-    const avgSize = level.qty / level.orders;
-    if (avgSize > 5000 && level.orders < 5) return { label: 'Whale', color: '#ff9800' };
-    if (avgSize < 100 && level.orders > 50) return { label: 'Retail', color: '#42a5f5' };
-    return { label: 'Normal', color: '#9c9c9c' };
+    if (!level || level.qty <= 0) return { label: '—', color: '#9c9c9c' };
+    if (level.orders > 0) {
+      const avgSize = level.qty / level.orders;
+      if (avgSize > 5000 && level.orders < 5) return { label: 'Whale', color: '#ff9800' };
+      if (avgSize < 100 && level.orders > 50) return { label: 'Retail', color: '#42a5f5' };
+      return { label: 'Normal', color: '#9c9c9c' };
+    }
+    // No order-count info — classify on qty only.
+    if (level.qty > 50) return { label: 'Heavy', color: '#ff9800' };
+    if (level.qty > 5)  return { label: 'Normal', color: '#9c9c9c' };
+    return { label: 'Light', color: '#42a5f5' };
   }
 
   dispose(): void {
@@ -191,6 +269,7 @@ export class VolumeProfilePanel {
     if (!this.container) {
       this.container = document.createElement('div');
       this.container.id = 'volume-profile-panel';
+      this.container.className = 'chart-floating-widget';
       this.container.style.cssText = `
         position: absolute;
         left: 10px;
@@ -205,6 +284,7 @@ export class VolumeProfilePanel {
       `;
       const parent = document.querySelector('.chart-container') || document.body;
       parent.appendChild(this.container);
+      makeDraggable(this.container, 'volume-profile-panel');
     }
     return this.container;
   }
