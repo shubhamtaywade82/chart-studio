@@ -360,8 +360,27 @@ class SmcPaneView implements IPrimitivePaneView {
 
           ctx.save();
 
+          // Keep the chart readable: only draw unmitigated zones and the most
+          // recent few structure breaks.
+          const MAX_BOS = 3;
+          const MAX_CHOCH = 2;
+          const MAX_FVG = 6;
+          const MAX_OB = 6;
+
+          const lastClose = candles[candles.length - 1]!.close;
+          const minFvgPct = 0.0008; // 0.08% of price — drop fly-specks
+          const validFvgs = state.fvgs
+            .filter((f) => !f.mitigated)
+            .filter((f) => (f.priceMax - f.priceMin) / lastClose >= minFvgPct)
+            .slice(-MAX_FVG);
+          const validObs = state.orderBlocks
+            .filter((o) => !o.mitigated)
+            .slice(-MAX_OB);
+          const validBos = state.bos.slice(-MAX_BOS);
+          const validChoch = state.choch.slice(-MAX_CHOCH);
+
           // ── 1. Draw FVGs ──
-          for (const fvg of state.fvgs) {
+          for (const fvg of validFvgs) {
             const yMin = series.priceToCoordinate(fvg.priceMin);
             const yMax = series.priceToCoordinate(fvg.priceMax);
             const xStart = ts.timeToCoordinate(fvg.startTime);
@@ -399,7 +418,7 @@ class SmcPaneView implements IPrimitivePaneView {
           }
 
           // ── 2. Draw Order Blocks ──
-          for (const ob of state.orderBlocks) {
+          for (const ob of validObs) {
             const yMin = series.priceToCoordinate(ob.priceMin);
             const yMax = series.priceToCoordinate(ob.priceMax);
             const xStart = ts.timeToCoordinate(ob.startTime);
@@ -443,7 +462,7 @@ class SmcPaneView implements IPrimitivePaneView {
           }
 
           // ── 3. Draw BOS Lines ──
-          for (const item of state.bos) {
+          for (const item of validBos) {
             const y = series.priceToCoordinate(item.price);
             const xStart = ts.timeToCoordinate(item.startTime);
             const xEnd = ts.timeToCoordinate(item.breakTime);
@@ -470,7 +489,7 @@ class SmcPaneView implements IPrimitivePaneView {
           }
 
           // ── 4. Draw CHoCH Lines ──
-          for (const item of state.choch) {
+          for (const item of validChoch) {
             const y = series.priceToCoordinate(item.price);
             const xStart = ts.timeToCoordinate(item.startTime);
             const xEnd = ts.timeToCoordinate(item.breakTime);
