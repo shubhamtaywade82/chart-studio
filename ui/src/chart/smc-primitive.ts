@@ -38,9 +38,19 @@ export class SmcPrimitive implements ISeriesPrimitive<Time> {
     this.requestUpdate = null;
   }
 
+  private lastCalcTime = 0;
+  private lastLength = 0;
+
   setCandles(candles: Candle[]): void {
     this.candles = candles;
-    this.calculateSMC();
+    const now = performance.now();
+    const lengthChanged = candles.length !== this.lastLength;
+
+    if (lengthChanged || now - this.lastCalcTime > 500) {
+      this.calculateSMC();
+      this.lastCalcTime = now;
+      this.lastLength = candles.length;
+    }
     this.requestUpdate?.();
   }
 
