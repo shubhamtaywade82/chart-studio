@@ -3,6 +3,7 @@ import {
   createTextWatermark,
   type IChartApi,
   type ISeriesApi,
+  type IPriceLine,
   type ITextWatermarkPluginApi,
   type Time,
   CandlestickSeries,
@@ -28,6 +29,8 @@ import { AnalyticsRenderer, type AnalyticsState } from './chart/analytics';
 import { AlertSystem } from './chart/alerts';
 import { LatencyMonitor, DepthHeatmap, VolumeProfilePanel } from './chart/market-monitor';
 import { AIOverlayManager, type AISignal as AISignalUI, type AILevel as AILevelUI, type TradeSetup as TradeSetupUI, type Urgency } from './chart/ai-overlay';
+import { klinecharts } from './scripts/klinecharts';
+
 
 interface AIAnnotationData {
   kind: string;
@@ -59,6 +62,7 @@ export class ChartView {
   private intervalMs = 0;
   private watermark: ITextWatermarkPluginApi<Time> | null = null;
   private indicatorSeries = new Map<string, Array<ISeriesApi<'Line'> | ISeriesApi<'Histogram'>>>();
+  private mountedScripts = new Map<string, { lineSeries: Array<ISeriesApi<'Line'>>, histogramSeries: Array<ISeriesApi<'Histogram'>> }>();
   private smcPrimitives = new Set<SmcPrimitive>();
   private analytics: AnalyticsRenderer | null = null;
   private alertSystem: AlertSystem;
@@ -68,6 +72,8 @@ export class ChartView {
   private aiOverlay: AIOverlayManager;
   private alertListeners = new Set<(alerts: any[]) => void>();
   private lastUpdatedTime: UTCTimestamp | null = null;
+  private askLine: IPriceLine | null = null;
+  private bidLine: IPriceLine | null = null;
 
   constructor(container: HTMLElement) {
     this._api = createChart(container, {
@@ -496,6 +502,46 @@ export class ChartView {
     this.ltpAnimator.reset();
     this.lastUpdatedTime = null;
     this.ltp.setLtp(null, '#2ebd85', null);
+    if (this.askLine) { try { this.series.removePriceLine(this.askLine); } catch {} this.askLine = null; }
+    if (this.bidLine) { try { this.series.removePriceLine(this.bidLine); } catch {} this.bidLine = null; }
+  }
+
+  setBookTicker(bestBidPrice: number, bestAskPrice: number): void {
+    const precision = this.precision;
+    const fmt = (p: number) => p.toLocaleString(undefined, {
+      minimumFractionDigits: precision,
+      maximumFractionDigits: precision,
+    });
+
+    if (this.askLine) {
+      this.series.removePriceLine(this.askLine);
+      this.askLine = null;
+    }
+    if (this.bidLine) {
+      this.series.removePriceLine(this.bidLine);
+      this.bidLine = null;
+    }
+
+    if (bestAskPrice > 0) {
+      this.askLine = this.series.createPriceLine({
+        price: bestAskPrice,
+        color: '#f6465d',
+        lineWidth: 1,
+        lineStyle: LineStyle.Dotted,
+        axisLabelVisible: true,
+        title: `Ask ${fmt(bestAskPrice)}`,
+      });
+    }
+    if (bestBidPrice > 0) {
+      this.bidLine = this.series.createPriceLine({
+        price: bestBidPrice,
+        color: '#2ebd85',
+        lineWidth: 1,
+        lineStyle: LineStyle.Dotted,
+        axisLabelVisible: true,
+        title: `Bid ${fmt(bestBidPrice)}`,
+      });
+    }
   }
 
   // ── Indicators ──────────────────────────────────────────────────────
@@ -875,6 +921,94 @@ export class ChartView {
   createOverlay(_opts: unknown): void { /* reserved */ }
   removeAllOverlays(): void { /* reserved */ }
 
+  applyRegisteredIndicator(scriptId: string, indicatorName: string, outputs: any[]): void {
+    const def = klinecharts.getIndicator(indicatorName);
+    if (!def) return;
+
+    let mounted = this.mountedScripts.get(scriptId);
+    if (!mounted) {
+      mounted = { lineSeries: [], histogramSeries: [] };
+      this.mountedScripts.set(scriptId, mounted);
+    }
+
+    // Remove previous series
+    for (const s of mounted.lineSeries) { try { this._api.removeSeries(s); } catch {} }
+    for (const s of mounted.histogramSeries) { try { this._api.removeSeries(s); } catch {} }
+    mounted.lineSeries = [];
+    mounted.histogramSeries = [];
+
+    // Compute values
+    const dataList = this.candles;
+    const calcResults = def.calc(dataList, def);
+
+    const times = this.candles.map(c => Math.floor(c.openTime / 1000) as UTCTimestamp);
+
+    // Draw figures
+    for (const fig of def.figures || []) {
+      const color = fig.color || '#58a6ff';
+      if (fig.type === 'bar') {
+        const s = this._api.addSeries(HistogramSeries, { color, priceLineVisible: false, lastValueVisible: false });
+        const data = calcResults.map((row: any, i: number) => ({
+          time: times[i]!,
+          value: row[fig.key],
+          color
+        })).filter(p => p.time !== null && Number.isFinite(p.value));
+        s.setData(data);
+        mounted.histogramSeries.push(s);
+      } else {
+        const s = this._api.addSeries(LineSeries, {
+          color,
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false
+        });
+        const data = calcResults.map((row: any, i: number) => ({
+          time: times[i]!,
+          value: row[fig.key]
+        })).filter(p => p.time !== null && Number.isFinite(p.value));
+        s.setData(data);
+        mounted.lineSeries.push(s);
+      }
+    }
+
+    // Render markers if any
+    const markers: any[] = [];
+    for (const out of outputs) {
+      if (out.kind === 'marker') {
+        for (const m of out.markers) {
+          if (typeof m.time !== 'number') continue;
+          markers.push({
+            time: (m.time / 1000) as UTCTimestamp,
+            position: m.position || 'aboveBar',
+            color: m.color || '#58a6ff',
+            shape: m.shape || 'circle',
+            text: m.text || ''
+          });
+        }
+      }
+    }
+
+    if (markers.length > 0) {
+      markers.sort((a, b) => a.time - b.time);
+      this.series.setMarkers(markers);
+    }
+  }
+
+  removeMountedScript(scriptId: string): void {
+    const mounted = this.mountedScripts.get(scriptId);
+    if (mounted) {
+      for (const s of mounted.lineSeries) { try { this._api.removeSeries(s); } catch {} }
+      for (const s of mounted.histogramSeries) { try { this._api.removeSeries(s); } catch {} }
+      this.mountedScripts.delete(scriptId);
+    }
+  }
+
+  clearAllMountedScripts(): void {
+    for (const scriptId of Array.from(this.mountedScripts.keys())) {
+      this.removeMountedScript(scriptId);
+    }
+  }
+
   // ── Events ──────────────────────────────────────────────────────────
 
   onCrosshair(fn: (i: CrosshairInfo | null) => void): () => void {
@@ -990,6 +1124,7 @@ export class ChartView {
       }
     }
     this.indicatorSeries.clear();
+    this.clearAllMountedScripts();
     this._api.remove();
   }
 }

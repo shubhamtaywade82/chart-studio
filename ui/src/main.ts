@@ -158,18 +158,48 @@ const main = (): void => {
     }
   });
 
-  // Sidebar / watchlist toggles
-  document.getElementById('btn-toggle-sidebar')?.addEventListener('click', () => {
+  // Sidebar / watchlist toggles with persistence
+  const sidebarToggle = document.getElementById('btn-toggle-sidebar');
+  const watchlistToggle = document.getElementById('watchlist-toggle');
+
+  const updateToggleStates = () => {
+    const isSidebarHidden = mainGrid.classList.contains('sidebar-hidden');
+    const isWatchlistHidden = mainGrid.classList.contains('watchlist-hidden');
+    
+    sidebarToggle?.classList.toggle('active', !isSidebarHidden);
+    watchlistToggle?.classList.toggle('active', !isWatchlistHidden);
+    
+    localStorage.setItem('ui-sidebar-hidden', String(isSidebarHidden));
+    localStorage.setItem('ui-watchlist-hidden', String(isWatchlistHidden));
+  };
+
+  // Restore states
+  if (localStorage.getItem('ui-sidebar-hidden') === 'true') mainGrid.classList.add('sidebar-hidden');
+  if (localStorage.getItem('ui-watchlist-hidden') === 'true') mainGrid.classList.add('watchlist-hidden');
+  updateToggleStates();
+
+  sidebarToggle?.addEventListener('click', () => {
     mainGrid.classList.toggle('sidebar-hidden');
+    updateToggleStates();
   });
-  document.getElementById('watchlist-toggle')?.addEventListener('click', () => {
+  watchlistToggle?.addEventListener('click', () => {
     mainGrid.classList.toggle('watchlist-hidden');
+    updateToggleStates();
   });
+
   document.addEventListener('keydown', (e) => {
     if (!(e.ctrlKey || e.metaKey)) return;
     const k = e.key.toLowerCase();
-    if (k === 'b') { e.preventDefault(); mainGrid.classList.toggle('sidebar-hidden'); }
-    else if (k === 'l') { e.preventDefault(); mainGrid.classList.toggle('watchlist-hidden'); }
+    if (k === 'b') { 
+      e.preventDefault(); 
+      mainGrid.classList.toggle('sidebar-hidden'); 
+      updateToggleStates();
+    }
+    else if (k === 'l') { 
+      e.preventDefault(); 
+      mainGrid.classList.toggle('watchlist-hidden'); 
+      updateToggleStates();
+    }
   });
 
   // Sidebar tab switching
@@ -366,7 +396,10 @@ const main = (): void => {
       if (tapeSellsEl) tapeSellsEl.textContent = String(tapeSells);
     }));
 
-    unsubs.push(client.streamBookTicker(state.provider, state.symbol, (bt) => updateHeaderTicker(bt.bestBidPrice, bt.bestAskPrice)));
+    unsubs.push(client.streamBookTicker(state.provider, state.symbol, (bt) => {
+      updateHeaderTicker(bt.bestBidPrice, bt.bestAskPrice);
+      chart.setBookTicker(bt.bestBidPrice, bt.bestAskPrice);
+    }));
     unsubs.push(client.streamAnalytics(state.provider, state.symbol, (data) => {
       chart.updateAnalytics(data);
       chart.renderVolumeProfile();

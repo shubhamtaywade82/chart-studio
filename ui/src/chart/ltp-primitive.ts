@@ -180,7 +180,7 @@ class LtpCountdownAxisView implements ISeriesPrimitiveAxisView {
 
   text(): string { return this.p._countdown() ?? ''; }
   textColor(): string { return '#ffffff'; }
-  backColor(): string { return 'rgba(60, 64, 75, 0.95)'; }
+  backColor(): string { return this.p._state().color; }
   visible(): boolean { return this.p._countdown() !== null && this.p._state().price !== null; }
   tickVisible(): boolean { return false; }
 }

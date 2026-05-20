@@ -73,15 +73,37 @@ function parseIndicatorDecl(
 ): Statement {
   const tok = expect(state, keyword);
   expect(state, '(');
-  const nameTok = expect(state, 'string');
+  
+  let name = 'Untitled';
   const opts: KwArg[] = [];
-  while (peek(state).type === ',') {
-    advance(state);
-    opts.push(parseKwArg(state));
+  
+  if (peek(state).type !== ')') {
+    if (peek(state).type === 'string') {
+      const nameTok = expect(state, 'string');
+      name = nameTok.value;
+      while (peek(state).type === ',') {
+        advance(state);
+        opts.push(parseKwArg(state));
+      }
+    } else {
+      while (true) {
+        const kw = parseKwArg(state);
+        if (kw.name === 'title' && kw.value.type === 'String') {
+          name = (kw.value as any).value;
+        } else {
+          opts.push(kw);
+        }
+        if (peek(state).type === ',') {
+          advance(state);
+          continue;
+        }
+        break;
+      }
+    }
   }
   expect(state, ')');
   const factory = nodeName === 'StrategyDecl' ? Node.StrategyDecl : Node.IndicatorDecl;
-  return factory(nameTok.value, opts, locOf(tok));
+  return factory(name, opts, locOf(tok));
 }
 
 function parseAssignmentOrInput(state: ParseState): Statement {

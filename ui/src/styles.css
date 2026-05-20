@@ -188,15 +188,17 @@ body::before {
   display: grid;
   grid-template-columns: 220px 1fr minmax(300px, min(420px, 32vw));
   grid-template-rows: 1fr;
-  gap: var(--gap);
+  column-gap: var(--gap);
   padding: var(--gap);
   overflow: hidden;
   z-index: 1;
-  transition: grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s, column-gap 0.3s;
 }
-#main-grid.sidebar-hidden { grid-template-columns: 220px 1fr 0px; }
-#main-grid.watchlist-hidden { grid-template-columns: 0px 1fr minmax(300px, min(420px, 32vw)); }
-#main-grid.sidebar-hidden.watchlist-hidden { grid-template-columns: 0px 1fr 0px; }
+#main-grid.sidebar-hidden { grid-template-columns: 220px 1fr 0px; column-gap: var(--gap) 0; }
+#main-grid.watchlist-hidden { grid-template-columns: 0px 1fr minmax(300px, min(420px, 32vw)); column-gap: 0 var(--gap); }
+#main-grid.sidebar-hidden.watchlist-hidden { grid-template-columns: 0px 1fr 0px; column-gap: 0; }
+#main-grid.watchlist-hidden { padding-left: 0; }
+#main-grid.sidebar-hidden { padding-right: 0; }
 
 #col-watchlist { display: flex; flex-direction: column; min-height: 0; overflow: hidden; transition: transform 0.3s, opacity 0.2s; }
 #main-grid.watchlist-hidden #col-watchlist { transform: translateX(-100%); opacity: 0; pointer-events: none; }
