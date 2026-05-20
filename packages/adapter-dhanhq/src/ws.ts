@@ -371,7 +371,7 @@ export class DhanStreamPool {
 
       if (raw.length >= 1) {
         const code = raw.readUInt8(0);
-        console.log(`[adapter-dhanhq] WebSocket frame received: code=${code}, length=${raw.length} bytes`);
+        // console.log(`[adapter-dhanhq] WebSocket frame received: code=${code}, length=${raw.length} bytes`);
       }
 
       // Validate header length field if present. Reject obviously truncated frames
@@ -437,18 +437,39 @@ export class DhanStreamPool {
     const send = (): void => {
       const ws = this.ws;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      // Chunk to 100 per message per Dhan limits
-      for (let i = 0; i < instruments.length; i += 100) {
-        const chunk = instruments.slice(i, i + 100);
-        const body = {
-          RequestCode: this.mode,
-          InstrumentCount: chunk.length,
-          InstrumentList: chunk.map((ins) => ({
-            ExchangeSegment: ins.exchangeSegment,
-            SecurityId: ins.securityId,
-          })),
-        };
-        try { ws.send(JSON.stringify(body)); } catch { /* noop */ }
+
+      // Group instruments by resolved RequestCode.
+      // Indices (IDX_I) do not support Full Feed (RequestCode 21), so they must use Quote (17) or Ticker (15).
+      const groups = new Map<number, DhanSubscription[]>();
+      for (const ins of instruments) {
+        const rc = ins.exchangeSegment.toUpperCase() === 'IDX_I'
+          ? (this.mode === REQ_TICKER ? REQ_TICKER : REQ_QUOTE)
+          : this.mode;
+        let list = groups.get(rc);
+        if (!list) {
+          list = [];
+          groups.set(rc, list);
+        }
+        list.push(ins);
+      }
+
+      // Send subscription messages for each RequestCode in chunks of 100
+      for (const [rc, list] of groups.entries()) {
+        for (let i = 0; i < list.length; i += 100) {
+          const chunk = list.slice(i, i + 100);
+          const body = {
+            RequestCode: rc,
+            InstrumentCount: chunk.length,
+            InstrumentList: chunk.map((ins) => ({
+              ExchangeSegment: ins.exchangeSegment,
+              SecurityId: ins.securityId,
+            })),
+          };
+          console.log(`[adapter-dhanhq] Subscribing: RequestCode=${rc}, count=${chunk.length}, instruments=${chunk.map(c => `${c.exchangeSegment}:${c.securityId}`).join(',')}`);
+          try { ws.send(JSON.stringify(body)); } catch (err) {
+            console.error('[adapter-dhanhq] Failed to send subscription message', err);
+          }
+        }
       }
     };
     if (this.ws && this.ws.readyState === WebSocket.OPEN) send();

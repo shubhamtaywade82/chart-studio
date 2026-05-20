@@ -52,9 +52,16 @@ export class ClientSession {
     private readonly socket: WebSocket,
     private readonly bridge: RedisBridge,
   ) {
+    console.log('[gateway] ClientSession connected');
     socket.on('message', (raw) => this.onMessage(raw.toString()));
-    socket.on('close', () => this.dispose());
-    socket.on('error', () => this.dispose());
+    socket.on('close', () => {
+      console.log('[gateway] ClientSession disconnected');
+      this.dispose();
+    });
+    socket.on('error', (err) => {
+      console.error('[gateway] ClientSession socket error:', err);
+      this.dispose();
+    });
   }
 
   private send(frame: OutboundFrame): void {
@@ -71,6 +78,7 @@ export class ClientSession {
 
   private subscribe(msg: InboundSub): void {
     const key = msg.channel === 'candle' ? (msg.interval ?? '1m') : undefined;
+    console.log(`[gateway] Client sub: id=${msg.id} provider=${msg.provider} symbol=${msg.symbol} channel=${msg.channel} key=${key}`);
     const reqId = randomUUID();
 
     let receivedAny = false;

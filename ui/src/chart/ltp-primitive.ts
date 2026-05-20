@@ -63,10 +63,10 @@ class LtpPaneView implements IPrimitivePaneView {
   constructor(private readonly p: LtpPrimitive) {}
 
   renderer(): IPrimitivePaneRenderer {
-    const { chart, series, price, color, startTime } = this.p._state();
     return {
       // target is CanvasRenderingTarget2D from fancy-canvas
       draw: (target: any) => {
+        const { chart, series, price, color, startTime } = this.p._state();
         if (!chart || !series || price === null) return;
         const y = series.priceToCoordinate(price);
         if (y === null) return;

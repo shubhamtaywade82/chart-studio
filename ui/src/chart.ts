@@ -53,6 +53,7 @@ export class ChartView {
   private volumeProfile: VolumeProfilePanel;
   private aiOverlay: AIOverlayManager;
   private alertListeners = new Set<(alerts: any[]) => void>();
+  private lastUpdatedTime: UTCTimestamp | null = null;
 
   constructor(container: HTMLElement) {
     this.chart = createChart(container, {
@@ -251,6 +252,9 @@ export class ChartView {
   setHistory(candles: Candle[]): void {
     this.candles = [...candles].sort((a, b) => a.openTime - b.openTime);
     this.ltpAnimator.reset();
+    this.lastUpdatedTime = this.candles.length > 0
+      ? ((this.candles[this.candles.length - 1]!.openTime / 1000) as UTCTimestamp)
+      : null;
 
     let precision = 2;
     if (this.candles.length > 0) {
@@ -289,6 +293,13 @@ export class ChartView {
   updateCandle(c: Candle): void {
     this.ltpAnimator.flush();
     const t = (c.openTime / 1000) as UTCTimestamp;
+
+    // Guard against updating older candles to avoid Lightweight Charts errors
+    if (this.lastUpdatedTime !== null && t < this.lastUpdatedTime) {
+      return;
+    }
+    this.lastUpdatedTime = t;
+
     this.series.update({ time: t, open: c.open, high: c.high, low: c.low, close: c.close });
     this.volume.update({
       time: t,
@@ -297,23 +308,33 @@ export class ChartView {
     });
 
     const last = this.candles[this.candles.length - 1];
-    if (last && last.openTime === c.openTime) this.candles[this.candles.length - 1] = c;
-    else this.candles.push(c);
+    if (last && last.openTime === c.openTime) {
+      this.candles[this.candles.length - 1] = c;
+    } else if (!last || c.openTime > last.openTime) {
+      this.candles.push(c);
+    }
 
     this.ltpAnimator.snapTo(c.close);
   }
 
-  setLastTradePrice(price: number): void {
+  setLastTradePrice(price: number, timestampMs?: number): void {
     if (!Number.isFinite(price) || price <= 0) return;
     const last = this.candles[this.candles.length - 1];
+    const currentTime = timestampMs ?? Date.now();
 
     // Interval rollover: create a new candle when the current interval expires.
-    if (this.intervalMs > 0 && last && Date.now() >= last.openTime + this.intervalMs) {
+    if (this.intervalMs > 0 && last && currentTime >= last.openTime + this.intervalMs) {
       this.ltpAnimator.flush();
-      const newOpenTime = Math.floor(Date.now() / this.intervalMs) * this.intervalMs;
+      const newOpenTime = Math.floor(currentTime / this.intervalMs) * this.intervalMs;
       const newCandle: Candle = { openTime: newOpenTime, open: price, high: price, low: price, close: price, volume: 0 };
-      this.candles.push(newCandle);
       const t = (newOpenTime / 1000) as UTCTimestamp;
+
+      if (this.lastUpdatedTime !== null && t < this.lastUpdatedTime) {
+        return;
+      }
+      this.lastUpdatedTime = t;
+
+      this.candles.push(newCandle);
       this.series.update({ time: t, open: price, high: price, low: price, close: price });
       this.volume.update({ time: t, value: 0, color: 'rgba(255, 255, 255, 0.18)' });
       this.ltpAnimator.snapTo(price);
@@ -328,6 +349,21 @@ export class ChartView {
         low: Math.min(last.low, price),
         close: price,
       };
+    } else {
+      // If no candles exist yet (race between trades and history), bootstrap one
+      // so the LTP line can at least show up.
+      const openTime = this.intervalMs > 0 ? Math.floor(currentTime / this.intervalMs) * this.intervalMs : currentTime;
+      const newCandle: Candle = { openTime, open: price, high: price, low: price, close: price, volume: 0 };
+      const t = (openTime / 1000) as UTCTimestamp;
+
+      if (this.lastUpdatedTime !== null && t < this.lastUpdatedTime) {
+        return;
+      }
+      this.lastUpdatedTime = t;
+
+      this.candles.push(newCandle);
+      this.series.update({ time: t, open: price, high: price, low: price, close: price });
+      this.volume.update({ time: t, value: 0, color: 'rgba(255, 255, 255, 0.18)' });
     }
 
     this.ltpAnimator.snapTo(price);
@@ -337,6 +373,13 @@ export class ChartView {
     const last = this.candles[this.candles.length - 1];
     if (!last) return;
     const t = (last.openTime / 1000) as UTCTimestamp;
+
+    // Guard against updating older candles during animation
+    if (this.lastUpdatedTime !== null && t < this.lastUpdatedTime) {
+      return;
+    }
+    this.lastUpdatedTime = t;
+
     // Use real high/low; only close is animated for visual smoothness.
     this.series.update({ time: t, open: last.open, high: last.high, low: last.low, close: animatedPrice });
     const color = animatedPrice >= last.open ? '#2ebd85' : '#f6465d';
@@ -346,6 +389,7 @@ export class ChartView {
   clearLastTradePrice(): void {
     this.candles = [];
     this.ltpAnimator.reset();
+    this.lastUpdatedTime = null;
     this.ltp.setLtp(null, '#2ebd85', null);
   }
 

@@ -205,12 +205,23 @@ export class DhanProvider implements MarketDataProvider {
 
   streamTrades(symbol: string, onTrade: (t: Trade) => void): Unsub {
     let lastLtt: number | undefined;
+    let lastLtp: number | undefined;
+    let lastVol: number | undefined;
     return this.deferredSubscribe(symbol, (ins) => this.pool.subscribe(
       { exchangeSegment: ins.exchangeSegment, securityId: ins.securityId },
       (tick: DhanTick) => {
         if (typeof tick.ltp !== 'number') return;
-        if (typeof tick.ltt === 'number' && tick.ltt === lastLtt) return;
+        if (
+          tick.ltt === lastLtt &&
+          tick.ltp === lastLtp &&
+          (tick.volume === undefined || tick.volume === lastVol)
+        ) {
+          return;
+        }
         lastLtt = tick.ltt;
+        lastLtp = tick.ltp;
+        if (tick.volume !== undefined) lastVol = tick.volume;
+
         onTrade({
           price: tick.ltp,
           qty: tick.ltq ?? 0,

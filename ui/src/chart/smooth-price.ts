@@ -29,6 +29,12 @@ export class SmoothPriceAnimator {
       this.onUpdate(price);
       return;
     }
+    // Optimization: if we're already animating toward this price, don't reset
+    // the timer, just let it continue.
+    if (price === this.target && this.frameId !== null) {
+      return;
+    }
+
     // Restart from current animated position so in-flight animations don't jump.
     this.startPrice = this.current;
     this.startTime = performance.now();
