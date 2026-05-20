@@ -288,6 +288,12 @@ export class ChartView {
     this.series.setData(cs);
     this.volume.setData(vs);
 
+    // New symbol can have a wildly different price magnitude (BTC ~$77k vs
+    // XRP ~$1.3). Force the price scale to re-auto-fit instead of inheriting
+    // the previous symbol's range.
+    this.chart.priceScale('right').applyOptions({ autoScale: true });
+    this.chart.timeScale().fitContent();
+
     const last = this.candles[this.candles.length - 1];
     if (last) this.setLastTradePrice(last.close);
 

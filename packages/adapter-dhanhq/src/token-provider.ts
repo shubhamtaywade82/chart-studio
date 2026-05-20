@@ -128,8 +128,10 @@ export class DhanTokenManager implements TokenProvider {
   private cached: { creds: DhanCreds; expiresAt: number } | null = null;
   private inflight: Promise<DhanCreds> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private lastTotpAttempt = 0;
   private onRotateFn: ((creds: DhanCreds) => void) | null = null;
+  
+  private lastTotpAttempt: number = 0;
+
   private lastFailure: { err: Error; ts: number } | null = null;
   
   private readonly authMode: string;
@@ -205,7 +207,6 @@ export class DhanTokenManager implements TokenProvider {
 
     this.inflight = (async () => {
       try {
-        // ... (rest of implementation remains similar, but I'll wrap the logic to capture failure)
         const creds = await this.doRefresh();
         this.lastFailure = null; // Clear failure on success
         return creds;
