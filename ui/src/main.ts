@@ -313,7 +313,7 @@ const main = (): void => {
     unsubs.push(client.streamTrades(state.provider, state.symbol, (t) => {
       tape.push(t);
       sentiment.push(t);
-      chart.setLastTradePrice(t.price, t.ts);
+      chart.setLastTradePrice(t.price, t.ts, t.qty);
       updateHeaderPrice(t.price);
       if (t.makerSide) tapeSells += 1; else tapeBuys += 1;
       if (tapeBuysEl) tapeBuysEl.textContent = String(tapeBuys);

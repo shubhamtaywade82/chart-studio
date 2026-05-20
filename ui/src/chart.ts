@@ -316,7 +316,7 @@ export class ChartView {
     this.ltpAnimator.snapTo(c.close);
   }
 
-  setLastTradePrice(price: number, timestampMs?: number): void {
+  setLastTradePrice(price: number, timestampMs?: number, qty?: number): void {
     if (!Number.isFinite(price) || price <= 0) return;
     const last = this.candles[this.candles.length - 1];
     const currentTime = timestampMs ?? Date.now();
@@ -325,14 +325,18 @@ export class ChartView {
     if (this.intervalMs > 0 && last && currentTime >= last.openTime + this.intervalMs) {
       this.ltpAnimator.flush();
       const newOpenTime = Math.floor(currentTime / this.intervalMs) * this.intervalMs;
-      const newCandle: Candle = { openTime: newOpenTime, open: price, high: price, low: price, close: price, volume: 0 };
+      const newCandle: Candle = { openTime: newOpenTime, open: price, high: price, low: price, close: price, volume: qty ?? 0 };
       const t = (newOpenTime / 1000) as UTCTimestamp;
 
       if (this.lastUpdatedTime === null || t >= this.lastUpdatedTime) {
         this.lastUpdatedTime = t;
         this.candles.push(newCandle);
         this.series.update({ time: t, open: price, high: price, low: price, close: price });
-        this.volume.update({ time: t, value: 0, color: 'rgba(255, 255, 255, 0.18)' });
+        this.volume.update({
+          time: t,
+          value: newCandle.volume,
+          color: 'rgba(255, 255, 255, 0.18)',
+        });
       }
       this.ltpAnimator.snapTo(price);
       return;
@@ -345,19 +349,24 @@ export class ChartView {
         high: Math.max(last.high, price),
         low: Math.min(last.low, price),
         close: price,
+        volume: last.volume + (qty ?? 0),
       };
     } else {
       // If no candles exist yet (race between trades and history), bootstrap one
       // so the LTP line can at least show up.
       const openTime = this.intervalMs > 0 ? Math.floor(currentTime / this.intervalMs) * this.intervalMs : currentTime;
-      const newCandle: Candle = { openTime, open: price, high: price, low: price, close: price, volume: 0 };
+      const newCandle: Candle = { openTime, open: price, high: price, low: price, close: price, volume: qty ?? 0 };
       const t = (openTime / 1000) as UTCTimestamp;
 
       if (this.lastUpdatedTime === null || t >= this.lastUpdatedTime) {
         this.lastUpdatedTime = t;
         this.candles.push(newCandle);
         this.series.update({ time: t, open: price, high: price, low: price, close: price });
-        this.volume.update({ time: t, value: 0, color: 'rgba(255, 255, 255, 0.18)' });
+        this.volume.update({
+          time: t,
+          value: newCandle.volume,
+          color: 'rgba(255, 255, 255, 0.18)',
+        });
       }
     }
 
@@ -369,14 +378,16 @@ export class ChartView {
     if (!last) return;
     const t = (last.openTime / 1000) as UTCTimestamp;
 
-    // Guard against updating older candles during animation
-    if (this.lastUpdatedTime !== null && t < this.lastUpdatedTime) {
-      return;
-    }
-    this.lastUpdatedTime = t;
-
     // Use real high/low; only close is animated for visual smoothness.
     this.series.update({ time: t, open: last.open, high: last.high, low: last.low, close: animatedPrice });
+
+    // Update volume series as well to keep it in sync (e.g. color based on animated close, and latest volume value)
+    this.volume.update({
+      time: t,
+      value: last.volume,
+      color: animatedPrice >= last.open ? 'rgba(46, 189, 133, 0.35)' : 'rgba(246, 70, 93, 0.35)',
+    });
+
     const color = animatedPrice >= last.open ? '#2ebd85' : '#f6465d';
     this.ltp.setLtp(animatedPrice, color, t);
   }
