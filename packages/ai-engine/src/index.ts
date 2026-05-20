@@ -24,4 +24,6 @@ export { assessRisk } from './risk';
 export { morningBrief } from './morning-brief';
 export { VectorStore } from './vector-store';
 export { CorrelationTracker } from './correlation';
+export { generateBrief } from './brief';
+export type { BriefResult, BriefRequest } from './brief';
 export * from './types';

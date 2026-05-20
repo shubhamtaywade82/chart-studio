@@ -13,11 +13,17 @@ services:
       REDIS_URL: redis://redis:6379
       PORT: "4100"
       GATEWAY_CORS_ORIGIN: "*"
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      OLLAMA_DISABLE: ${OLLAMA_DISABLE:-0}
+      AI_NARRATIVE_MODEL: ${AI_NARRATIVE_MODEL:-llama3.2:3b}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - redis
     ports:
       - "4100:4100"
     restart: unless-stopped
+
 
   adapter-binance:
     build:
