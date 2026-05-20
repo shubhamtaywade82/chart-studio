@@ -47,6 +47,31 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 button { font-family: inherit; color: inherit; }
 input, textarea, select { font-family: inherit; }
 
+select {
+  background-color: #1a1e26; /* Solid dark background */
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  outline: none;
+  cursor: pointer;
+  appearance: auto; /* Fallback for most browsers to use system dropdown but styled */
+}
+
+select option {
+  background-color: #1a1e26; /* Solid dark background for the dropdown list */
+  color: var(--text-primary);
+}
+
+select:hover {
+  border-color: var(--border-accent);
+}
+
+/* Custom ghost select override to ensure it's not transparent */
+select.ghost {
+  background-color: #1a1e26 !important;
+}
+
 body::before {
   content: '';
   position: fixed; inset: 0;
@@ -266,7 +291,18 @@ body::before {
 /* Candle theme picker (chart panel header) */
 .candle-theme-wrap { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); padding-left: 8px; border-left: 1px solid rgba(255,255,255,0.08); }
 .candle-theme-label { text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
-#candle-theme-select { appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 22px; background-image: linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%), linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%); background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%; background-size: 4px 4px, 4px 4px; background-repeat: no-repeat; }
+#candle-theme-select {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  padding-right: 22px;
+  background-color: #1a1e26;
+  color: var(--text-primary);
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%), linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
 
 /* Chart crosshair tooltip (Binance-style OHLC overlay) */
 .chart-tooltip {

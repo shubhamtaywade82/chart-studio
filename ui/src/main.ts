@@ -3,6 +3,7 @@ import { ProviderClient, type Candle, type SymbolRef } from './provider-client';
 import { OrderBookPanel } from './panels/orderbook';
 import { TradeTapePanel } from './panels/trade-tape';
 import { SentimentPanel } from './panels/sentiment';
+import { MicrostructurePanel } from './panels/microstructure';
 import { GlobalSearch } from './search/global-search';
 import { ProviderSettings } from './settings/providers';
 import { WatchlistPanel } from './watchlist/watchlist';
@@ -64,6 +65,7 @@ const main = (): void => {
   const ob = new OrderBookPanel(obRoot, obSpread);
   const tape = new TradeTapePanel(tapeRoot);
   const sentiment = new SentimentPanel(sentimentRoot);
+  const microstructure = new MicrostructurePanel();
   const settings = new ProviderSettings(client);
   const watchlist = new WatchlistPanel(watchlistRoot, client);
   const indicatorPicker = new IndicatorPicker();
@@ -229,7 +231,11 @@ const main = (): void => {
   };
 
   const tearDown = (): void => {
-    for (const u of unsubs) try { u(); } catch { /* noop */ }
+    for (const fn of unsubs) try { fn(); } catch { /* noop */ }
+    sentiment.reset();
+    microstructure.reset();
+    tape.reset();
+    ob.reset(null);
     unsubs.length = 0;
   };
 
@@ -311,13 +317,23 @@ const main = (): void => {
     ));
     unsubs.push(client.streamDepth(
       state.provider, state.symbol,
-      (snap) => ob.reset(snap),
-      (delta) => ob.applyDelta(delta),
+      (snap) => {
+        ob.reset(snap);
+        if (snap) {
+          microstructure.updateDepth(snap.bids ?? [], snap.asks ?? []);
+        }
+      },
+      (delta) => {
+        ob.applyDelta(delta);
+        const fullSnap = ob.getSnapshot();
+        microstructure.updateDepth(fullSnap.bids, fullSnap.asks);
+      },
     ));
     unsubs.push(client.streamTrades(state.provider, state.symbol, (t) => {
       updateHeaderPrice(t.price);
       tape.push(t);
       sentiment.push(t);
+      microstructure.pushTrade(t);
       chart.setLastTradePrice(t.price, t.ts, t.qty);
       if (t.makerSide) tapeSells += 1; else tapeBuys += 1;
       if (tapeBuysEl) tapeBuysEl.textContent = String(tapeBuys);
@@ -335,6 +351,12 @@ const main = (): void => {
     }));
     unsubs.push(client.streamAIAnnotation(state.provider, state.symbol, (ann) => {
       chart.applyAIAnnotation(ann);
+      if (ann.kind === 'reflex') {
+        const data = ann.data as { derived?: { volatilityRegime?: string; toxicity?: number } };
+        const reg = data.derived?.volatilityRegime;
+        const tox = data.derived?.toxicity;
+        microstructure.updateAI(reg, tox);
+      }
     }));
   };
 

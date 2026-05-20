@@ -20,6 +20,7 @@ import { LtpPrimitive } from './chart/ltp-primitive';
 import { SmoothPriceAnimator } from './chart/smooth-price';
 import { ema, sma, macd, rsi, bollinger } from './indicators/math';
 import type { ActiveIndicator } from './indicators/registry';
+import { SmcPrimitive } from './chart/smc-primitive';
 import { AnalyticsRenderer, type AnalyticsState } from './chart/analytics';
 import { AlertSystem } from './chart/alerts';
 import { LatencyMonitor, DepthHeatmap, VolumeProfilePanel } from './chart/market-monitor';
@@ -46,6 +47,7 @@ export class ChartView {
   private intervalMs = 0;
   private watermark: ITextWatermarkPluginApi<Time> | null = null;
   private indicatorSeries = new Map<string, Array<ISeriesApi<'Line'> | ISeriesApi<'Histogram'>>>();
+  private smcPrimitives = new Set<SmcPrimitive>();
   private analytics: AnalyticsRenderer | null = null;
   private alertSystem: AlertSystem;
   private latencyMonitor: LatencyMonitor;
@@ -288,6 +290,10 @@ export class ChartView {
 
     const last = this.candles[this.candles.length - 1];
     if (last) this.setLastTradePrice(last.close);
+
+    for (const smc of this.smcPrimitives) {
+      smc.setCandles(this.candles);
+    }
   }
 
   updateCandle(c: Candle): void {
@@ -318,6 +324,10 @@ export class ChartView {
 
     // Always update visual LTP line regardless of series time guard.
     this.ltpAnimator.snapTo(c.close);
+
+    for (const smc of this.smcPrimitives) {
+      smc.setCandles(this.candles);
+    }
   }
 
   setLastTradePrice(price: number, timestampMs?: number, qty?: number): void {
@@ -547,6 +557,11 @@ export class ChartView {
     }
     this.indicatorSeries.clear();
 
+    for (const smc of this.smcPrimitives) {
+      try { this.series.detachPrimitive(smc); } catch { /* ignore */ }
+    }
+    this.smcPrimitives.clear();
+
     // Clean up dynamic analytics sub-panes
     this.analytics?.removeCvdSeries();
     this.analytics?.removeOiSeries();
@@ -658,6 +673,14 @@ export class ChartView {
           sigS.setData(toLineData(sigLine));
           histS.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0.1 } });
           added.push(histS, macdS, sigS);
+          break;
+        }
+        case 'SMC': {
+          const [period = 5] = ind.params;
+          const smc = new SmcPrimitive(period);
+          smc.setCandles(this.candles);
+          this.series.attachPrimitive(smc);
+          this.smcPrimitives.add(smc);
           break;
         }
         default:
