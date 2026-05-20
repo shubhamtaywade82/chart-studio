@@ -47,6 +47,7 @@ export interface BriefResult {
   disclaimer: string;
   ts: number;
   heuristic: boolean;
+  mtf?: Record<string, any[]>; // Multi-timeframe candles
 }
 
 // ── State Cache ───────────────────────────────────────────────────────────────
@@ -216,13 +217,14 @@ function parseLLMBrief(raw: string, symbol: string, interval: string): BriefResu
 
   // Parse numbered sections
   const sections: BriefSection[] = [];
-  const headingMap: Record<string, string> = { '1': 'BIAS', '2': 'STRUCTURE', '3': 'ORDER FLOW', '4': 'WATCH' };
-  const sectionRx = /(?:^|\n)\s*(\d)\.\s*(BIAS|STRUCTURE|ORDER FLOW|WATCH)[:\s]*/gi;
+  const headingMap: Record<string, string> = { '1': 'BIAS', '2': 'STRUCTURE', '3': 'ORDER FLOW', '4': 'WATCH', '5': 'MULTI-TIMEFRAME' };
+  const sectionRx = /(?:^|\n)\s*(\d)\.\s*(BIAS|STRUCTURE|ORDER FLOW|WATCH|MULTI[-\s]?TIMEFRAME)[:\s]*/gi;
   const found: Array<{ index: number; num: string }> = [];
   let m: RegExpExecArray | null;
 
   // eslint-disable-next-line no-cond-assign
-  while ((m = sectionRx.exec(bodyRaw)) !== null) {
+  // Capture MULTI-TIMEFRAME as section 5 if present
+while ((m = sectionRx.exec(bodyRaw)) !== null) {
     found.push({ index: m.index, num: m[1]! });
   }
 
@@ -230,7 +232,7 @@ function parseLLMBrief(raw: string, symbol: string, interval: string): BriefResu
     const start = found[i]!.index;
     const end = i + 1 < found.length ? found[i + 1]!.index : bodyRaw.length;
     const body = bodyRaw.slice(start, end)
-      .replace(/^\s*\d\.\s*(BIAS|STRUCTURE|ORDER FLOW|WATCH)[:\s]*/i, '')
+      .replace(/^\s*\d\.\s*(BIAS|STRUCTURE|ORDER FLOW|WATCH|MULTI[-\s]?TIMEFRAME)[:\s]*/i, '')
       .replace(/\*/g, '')
       .trim();
     if (body) sections.push({ heading: headingMap[found[i]!.num] ?? 'ANALYSIS', body });
@@ -326,9 +328,10 @@ export async function handleBriefRequest(req: IncomingMessage, res: ServerRespon
     const system = `You are a senior Indian equity and F&O prop desk analyst. Write concise institutional-quality market analysis. Be direct, use numbers, avoid filler words. Never give explicit buy/sell recommendations — frame everything as observations and probabilities.`;
     try {
       const raw = await ollamaGenerate(prompt, system);
-      result = raw && raw.trim().length > 40
+      const parsed = raw && raw.trim().length > 40
         ? parseLLMBrief(raw.trim(), symbol, interval)
         : heuristicBrief(state, symbol, interval);
+      result = { ...parsed, mtf };
     } catch {
       result = heuristicBrief(state, symbol, interval);
     }

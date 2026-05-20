@@ -54,8 +54,9 @@ export class BinanceProvider implements MarketDataProvider {
     if (!q) return symbols.slice(0, limit).map((s) => toSymbolRef(this.id, seg, s));
     const matches: SymbolRef[] = [];
     for (const s of symbols) {
-      const sym = s.symbol.toUpperCase();
-      if (sym.includes(q)) matches.push(toSymbolRef(this.id, seg, s));
+      const ref = toSymbolRef(this.id, seg, s);
+      const hay = `${ref.symbol} ${ref.label || ''}`.toUpperCase();
+      if (hay.includes(q)) matches.push(ref);
       if (matches.length >= limit) break;
     }
     return matches;
