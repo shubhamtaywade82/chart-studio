@@ -33,15 +33,16 @@ interface AIAnnotationData {
 }
 
 export class ChartView {
-  private chart: IChartApi;
+  private _api: IChartApi;
   private series: ISeriesApi<'Candlestick'>;
   private volume: ISeriesApi<'Histogram'>;
 
-  /**
-   * Expose the main candlestick series for external consumers.
-   */
-  public mainSeries(): ISeriesApi<'Candlestick'> {
+  public getMainSeries(): ISeriesApi<'Candlestick'> {
     return this.series;
+  }
+
+  public getApi(): IChartApi {
+    return this._api;
   }
   private ltp: LtpPrimitive;
   private ltpAnimator: SmoothPriceAnimator;
@@ -66,7 +67,7 @@ export class ChartView {
   private lastUpdatedTime: UTCTimestamp | null = null;
 
   constructor(container: HTMLElement) {
-    this.chart = createChart(container, {
+    this._api = createChart(container, {
       width: container.clientWidth,
       height: container.clientHeight,
       layout: {
@@ -112,20 +113,20 @@ export class ChartView {
       autoSize: false,
     });
 
-    this.series = this.chart.addSeries(CandlestickSeries, {
+    this.series = this._api.addSeries(CandlestickSeries, {
       ...this.theme.options,
       priceLineVisible: true,
       priceLineStyle: LineStyle.Dashed,
       lastValueVisible: true,
     });
 
-    this.volume = this.chart.addSeries(HistogramSeries, {
+    this.volume = this._api.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' },
       color: 'rgba(255, 255, 255, 0.18)',
       priceScaleId: 'volume',
     }, 0);
 
-    this.chart.priceScale('volume').applyOptions({
+    this._api.priceScale('volume').applyOptions({
       scaleMargins: { top: 0.8, bottom: 0 },
     });
 
@@ -134,7 +135,7 @@ export class ChartView {
 
     this.ltpAnimator = new SmoothPriceAnimator(0.01, (p) => this.onSmoothPriceUpdate(p));
 
-    const pane0 = this.chart.panes()[0];
+    const pane0 = this._api.panes()[0];
     if (pane0) {
       this.watermark = createTextWatermark(pane0, {
         lines: [{ text: 'CHART STUDIO', color: 'rgba(255, 255, 255, 0.03)', fontSize: 48 }],
@@ -142,15 +143,15 @@ export class ChartView {
     }
 
     this.resizeObs = new ResizeObserver(() => {
-      this.chart.resize(container.clientWidth, container.clientHeight);
+      this._api.resize(container.clientWidth, container.clientHeight);
     });
     this.resizeObs.observe(container);
 
-    this.chart.subscribeClick((p) => this.handleClick(p));
-    this.chart.subscribeCrosshairMove((p) => this.handleCrosshair(p));
-    this.chart.timeScale().subscribeVisibleLogicalRangeChange((r) => this.handleRangeChange(r));
+    this._api.subscribeClick((p) => this.handleClick(p));
+    this._api.subscribeCrosshairMove((p) => this.handleCrosshair(p));
+    this._api.timeScale().subscribeVisibleLogicalRangeChange((r) => this.handleRangeChange(r));
 
-    this.analytics = new AnalyticsRenderer(this.chart, this.series);
+    this.analytics = new AnalyticsRenderer(this._api, this.series);
     this.analytics.setupAtpSeries();
     this.indicatorBasePane = 1;
 
@@ -162,7 +163,7 @@ export class ChartView {
     this.latencyMonitor = new LatencyMonitor();
     this.depthHeatmap = new DepthHeatmap();
     this.volumeProfile = new VolumeProfilePanel();
-    this.aiOverlay = new AIOverlayManager(this.chart, this.series, container);
+    this.aiOverlay = new AIOverlayManager(this._api, this.series, container);
   }
 
   /** Day open ms timestamp used to extrapolate expected volume. */
@@ -322,8 +323,8 @@ export class ChartView {
     // New symbol can have a wildly different price magnitude (BTC ~$77k vs
     // XRP ~$1.3). Force the price scale to re-auto-fit instead of inheriting
     // the previous symbol's range.
-    this.chart.priceScale('right').applyOptions({ autoScale: true });
-    this.chart.timeScale().fitContent();
+    this._api.priceScale('right').applyOptions({ autoScale: true });
+    this._api.timeScale().fitContent();
 
     const last = this.candles[this.candles.length - 1];
     if (last) this.setLastTradePrice(last.close);
@@ -596,7 +597,7 @@ export class ChartView {
   setIndicators(list: ActiveIndicator[]): void {
     for (const seriesList of this.indicatorSeries.values()) {
       for (const s of seriesList) {
-        try { this.chart.removeSeries(s); } catch { /* ignore */ }
+        try { this._api.removeSeries(s); } catch { /* ignore */ }
       }
     }
     this.indicatorSeries.clear();
@@ -639,7 +640,7 @@ export class ChartView {
         case 'MA': {
           ind.params.forEach((period, i) => {
             if (!period) return;
-            const s = this.chart.addSeries(LineSeries, {
+            const s = this._api.addSeries(LineSeries, {
               color: MA_COLORS[i % MA_COLORS.length]!,
               lineWidth: 1,
               lastValueVisible: false,
@@ -654,7 +655,7 @@ export class ChartView {
         case 'EMA': {
           ind.params.forEach((period, i) => {
             if (!period) return;
-            const s = this.chart.addSeries(LineSeries, {
+            const s = this._api.addSeries(LineSeries, {
               color: EMA_COLORS[i % EMA_COLORS.length]!,
               lineWidth: 1,
               lastValueVisible: false,
@@ -669,13 +670,13 @@ export class ChartView {
         case 'BOLL': {
           const [period = 20, mult = 2] = ind.params;
           const { upper, middle, lower } = bollinger(closes, period, mult);
-          const midS = this.chart.addSeries(LineSeries, {
+          const midS = this._api.addSeries(LineSeries, {
             color: '#ff9800', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, title: `BB(${period})`,
           });
-          const upS = this.chart.addSeries(LineSeries, {
+          const upS = this._api.addSeries(LineSeries, {
             color: 'rgba(255, 152, 0, 0.5)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false,
           });
-          const loS = this.chart.addSeries(LineSeries, {
+          const loS = this._api.addSeries(LineSeries, {
             color: 'rgba(255, 152, 0, 0.5)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false,
           });
           midS.setData(toLineData(middle));
@@ -687,7 +688,7 @@ export class ChartView {
         case 'RSI': {
           const pane = nextSubPane++;
           const [period = 14] = ind.params;
-          const s = this.chart.addSeries(LineSeries, {
+          const s = this._api.addSeries(LineSeries, {
             color: '#7b1fa2', lineWidth: 1, lastValueVisible: true, priceLineVisible: false, title: `RSI(${period})`,
           }, pane);
           s.setData(toLineData(rsi(closes, period)));
@@ -699,13 +700,13 @@ export class ChartView {
           const pane = nextSubPane++;
           const [fast = 12, slow = 26, signal = 9] = ind.params;
           const { macd: macdLine, signal: sigLine, hist } = macd(closes, fast, slow, signal);
-          const histS = this.chart.addSeries(HistogramSeries, {
+          const histS = this._api.addSeries(HistogramSeries, {
             lastValueVisible: false, priceLineVisible: false,
           }, pane);
-          const macdS = this.chart.addSeries(LineSeries, {
+          const macdS = this._api.addSeries(LineSeries, {
             color: '#2196f3', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, title: 'MACD',
           }, pane);
-          const sigS = this.chart.addSeries(LineSeries, {
+          const sigS = this._api.addSeries(LineSeries, {
             color: '#ff9800', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, title: 'Signal',
           }, pane);
           histS.setData(
@@ -771,13 +772,11 @@ export class ChartView {
   }
 
   scrollToRealtime(): void {
-    this.chart.timeScale().scrollToRealTime();
+    this._api.timeScale().scrollToRealTime();
   }
 
-  api(): IChartApi { return this.chart; }
-
   xToTime(x: number): UTCTimestamp | null {
-    return this.chart.timeScale().coordinateToTime(x) as UTCTimestamp | null;
+    return this._api.timeScale().coordinateToTime(x) as UTCTimestamp | null;
   }
 
   yToPrice(y: number): number | null {
@@ -870,11 +869,11 @@ export class ChartView {
     // do not see a partially-torn-down chart.
     for (const seriesList of this.indicatorSeries.values()) {
       for (const s of seriesList) {
-        try { this.chart.removeSeries(s); } catch { /* noop */ }
+        try { this._api.removeSeries(s); } catch { /* noop */ }
       }
     }
     this.indicatorSeries.clear();
-    this.chart.remove();
+    this._api.remove();
   }
 }
 

@@ -77,20 +77,20 @@ export class DrawingLayer {
 
   remove(id: string): void {
     this.drawings = this.drawings.filter((d) => d.id !== id);
-    const main = this.chart.mainSeries();
+    const main = this.chart.getMainSeries();
     const hh = this.hlineHandles.get(id);
     if (hh) { try { main.removePriceLine(hh); } catch { /* noop */ } this.hlineHandles.delete(id); }
     const th = this.trendlineHandles.get(id);
-    if (th) { try { this.chart.api().removeSeries(th); } catch { /* noop */ } this.trendlineHandles.delete(id); }
+    if (th) { try { this.chart.getApi().removeSeries(th); } catch { /* noop */ } this.trendlineHandles.delete(id); }
     this.persist();
   }
 
   clear(): void { for (const d of [...this.drawings]) this.remove(d.id); }
 
   private clearMounted(): void {
-    const main = this.chart.mainSeries();
+    const main = this.chart.getMainSeries();
     for (const h of this.hlineHandles.values()) { try { main.removePriceLine(h); } catch { /* noop */ } }
-    for (const s of this.trendlineHandles.values()) { try { this.chart.api().removeSeries(s); } catch { /* noop */ } }
+    for (const s of this.trendlineHandles.values()) { try { this.chart.getApi().removeSeries(s); } catch { /* noop */ } }
     this.hlineHandles.clear();
     this.trendlineHandles.clear();
   }
@@ -99,12 +99,12 @@ export class DrawingLayer {
 
   private mount(d: Drawing): void {
     if (d.kind === 'hline') {
-      const handle = this.chart.mainSeries().createPriceLine({
+      const handle = this.chart.getMainSeries().createPriceLine({
         price: d.price, color: d.color, lineStyle: LineStyle.Dashed, lineWidth: 1 as LineWidth, axisLabelVisible: true, title: '',
       });
       this.hlineHandles.set(d.id, handle);
     } else if (d.kind === 'trendline') {
-      const s = this.chart.api().addSeries(LineSeries, { color: d.color, lineWidth: 2 as LineWidth, lastValueVisible: false, priceLineVisible: false });
+      const s = this.chart.getApi().addSeries(LineSeries, { color: d.color, lineWidth: 2 as LineWidth, lastValueVisible: false, priceLineVisible: false });
       const p1 = { time: d.t1, value: d.p1 };
       const p2 = { time: d.t2, value: d.p2 };
       const ordered = (p1.time as number) <= (p2.time as number) ? [p1, p2] : [p2, p1];
