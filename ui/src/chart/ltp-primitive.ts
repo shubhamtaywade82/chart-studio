@@ -75,8 +75,6 @@ class LtpPaneView implements ISeriesPrimitivePaneView {
         const xEnd = scope.mediaSize.width;
         const ctx = scope.context;
 
-        console.log(`[LtpPrimitive] draw price=${price} y=${y} xStart=${xStart}`);
-
         ctx.save();
         
         // Draw the horizontal line

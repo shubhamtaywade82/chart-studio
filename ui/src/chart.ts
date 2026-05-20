@@ -25,6 +25,7 @@ export class ChartView {
   private ltp: LtpPrimitive;
   private candles: Candle[] = [];
   private theme: CandleTheme = loadCandleTheme();
+  private precision: number = 2;
   private resizeObs: ResizeObserver;
   private crosshairListeners = new Set<(c: CrosshairInfo | null) => void>();
   private liveListeners = new Set<(atLive: boolean) => void>();
@@ -87,7 +88,8 @@ export class ChartView {
 
     this.series = this.chart.addSeries(CandlestickSeries, {
       ...this.theme.options,
-      priceLineVisible: false,
+      priceLineVisible: true,
+      priceLineStyle: LineStyle.Dashed,
       lastValueVisible: true,
     });
 
@@ -122,22 +124,37 @@ export class ChartView {
 
   // ── Data ────────────────────────────────────────────────────────────
 
-  setHistory(candles: Candle[]): void {
-    this.candles = [...candles].sort((a, b) => a.openTime - b.openTime);
-    
-    // Auto-detect precision from the first few candles
-    let precision = 2;
-    if (this.candles.length > 0) {
-      const sample = this.candles[0].close.toString();
-      if (sample.includes('.')) {
-        precision = Math.max(2, sample.split('.')[1].length);
+  private autoDetectPrecision(prices: number[]): void {
+    let p = this.precision;
+    for (const val of prices) {
+      const s = val.toString();
+      if (s.includes('.')) {
+        p = Math.max(p, s.split('.')[1].length);
       }
     }
-    this.series.applyOptions({
-      priceFormat: {
-        type: 'price',
-        precision: precision,
-        minMove: 1 / Math.pow(10, precision),
+    
+    if (p > this.precision) {
+      console.log(`[ChartView] Precision upgraded to ${p}`);
+      this.precision = p;
+      this.series.applyOptions({
+        priceFormat: {
+          type: 'price',
+          precision: this.precision,
+          minMove: 1 / Math.pow(10, this.precision),
+        },
+      });
+    }
+  }
+
+  setHistory(candles: Candle[]): void {
+    this.candles = [...candles].sort((a, b) => a.openTime - b.openTime);
+    this.autoDetectPrecision(this.candles.map(c => c.close));
+    
+    // Apply price scale options (Margins)
+    this.series.priceScale().applyOptions({
+      scaleMargins: {
+        top: 0.1,
+        bottom: 0.2,
       },
     });
 
@@ -161,6 +178,7 @@ export class ChartView {
   }
 
   updateCandle(c: Candle): void {
+    this.autoDetectPrecision([c.close, c.high, c.low]);
     const t = (c.openTime / 1000) as UTCTimestamp;
     this.series.update({ time: t, open: c.open, high: c.high, low: c.low, close: c.close });
     this.volume.update({ time: t, value: c.volume, color: c.close >= c.open ? 'rgba(46, 189, 133, 0.35)' : 'rgba(246, 70, 93, 0.35)' });
@@ -175,6 +193,7 @@ export class ChartView {
 
   setLastTradePrice(price: number): void {
     if (!Number.isFinite(price) || price <= 0) return;
+    this.autoDetectPrecision([price]);
     const last = this.candles[this.candles.length - 1];
     if (last) {
       const next: Candle = { ...last, high: Math.max(last.high, price), low: Math.min(last.low, price), close: price };
@@ -197,7 +216,7 @@ export class ChartView {
   themes(): readonly CandleTheme[] { return CANDLE_THEMES; }
   currentTheme(): CandleTheme { return this.theme; }
   getPrecision(): number {
-    return (this.series.options() as any).priceFormat.precision ?? 2;
+    return this.precision;
   }
 
   setTheme(id: string): void {
@@ -224,6 +243,8 @@ export class ChartView {
   scrollToRealtime(): void {
     this.chart.timeScale().scrollToRealTime();
   }
+
+  api(): IChartApi { return this.chart; }
 
   private handleCrosshair(p: MouseEventParams): void {
     if (!p.time || p.point === undefined) {
@@ -272,4 +293,5 @@ export interface CrosshairInfo {
   time: number;
   open: number; high: number; low: number; close: number;
   volume: number | null;
+  formattedPrice?: string;
 }
