@@ -88,7 +88,7 @@ export class DhanProvider implements MarketDataProvider {
   }
 
   async getInstrumentMeta(symbol: string): Promise<InstrumentMeta | null> {
-    const ins = findInstrument(symbol);
+    const ins = await findInstrumentAsync(symbol, this.cfg.scripMasterUrl);
     if (!ins) return null;
     return toInstrumentMeta(this.id, ins);
   }
@@ -96,13 +96,13 @@ export class DhanProvider implements MarketDataProvider {
   // ── Snapshots ────────────────────────────────────────────────────────
 
   async getCandles(symbol: string, interval: string, opts: { limit?: number; startTime?: number; endTime?: number } = {}): Promise<Candle[]> {
-    const ins = findInstrument(symbol);
+    const ins = await findInstrumentAsync(symbol, this.cfg.scripMasterUrl);
     if (!ins) return [];
     return fetchCandles(this.client, ins, interval, opts);
   }
 
   async getOrderBook(symbol: string): Promise<OrderBookSnapshot | null> {
-    const ins = findInstrument(symbol);
+    const ins = await findInstrumentAsync(symbol, this.cfg.scripMasterUrl);
     if (!ins) return null;
     return fetchMarketDepth(this.client, ins);
   }
