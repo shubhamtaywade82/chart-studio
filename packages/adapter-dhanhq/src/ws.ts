@@ -20,10 +20,18 @@ import type { TokenProvider } from './token-provider';
  */
 
 const FEED_BASE = 'wss://api-feed.dhan.co';
-const REQ_TICKER = 15;
-const REQ_QUOTE = 17;
-const REQ_FULL = 21;
+// Request codes per Dhan v2 docs: 15=Quote, 17=Full, 21=Ticker.
+const REQ_TICKER = 21;
+const REQ_QUOTE  = 15;
+const REQ_FULL   = 17;
 const REQ_DISCONNECT = 12;
+
+// Maps the numeric exchangeSegment byte in binary frames to the string segment
+// used as subscription key (matches DhanInstrument.exchangeSegment).
+const SEGMENT_MAP: Record<number, string> = {
+  1: 'NSE_EQ', 2: 'NSE_FNO', 3: 'NSE_CURRENCY', 4: 'NSE_COMMODITY',
+  8: 'BSE_EQ', 9: 'BSE_FNO', 10: 'MCX_COMM', 11: 'BSE_CURRENCY',
+};
 
 export interface DhanTick {
   exchangeSegment: number;
@@ -210,16 +218,13 @@ export class DhanStreamPool {
       if (!(raw instanceof Buffer)) return;
       const tick = parseTick(raw);
       if (!tick) return;
-      const key = `${tick.exchangeSegment}:${tick.securityId}`;
-      // The numeric segment in the frame won't match our string keys directly,
-      // so we look up by securityId across our subs.
-      for (const [k, entry] of this.subs) {
-        const [, secId] = k.split(':');
-        if (secId && Number(secId) === tick.securityId) {
-          for (const fn of entry.fns) fn(tick);
-        }
+      const segStr = SEGMENT_MAP[tick.exchangeSegment];
+      if (!segStr) return;
+      const key = `${segStr}:${tick.securityId}`;
+      const entry = this.subs.get(key);
+      if (entry) {
+        for (const fn of entry.fns) fn(tick);
       }
-      void key;
     });
 
     ws.on('error', () => { /* let close handler schedule reconnect */ });

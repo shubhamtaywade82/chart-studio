@@ -23,6 +23,12 @@ import { createClient, fetchCandles, fetchMarketDepth } from './rest';
 import { DhanStreamPool, type DhanTick } from './ws';
 import type { TokenProvider } from './token-provider';
 
+const INTERVAL_MS: Record<string, number> = {
+  '1m': 60_000, '3m': 180_000, '5m': 300_000, '15m': 900_000, '30m': 1_800_000,
+  '1h': 3_600_000, '2h': 7_200_000, '4h': 14_400_000, '6h': 21_600_000, '12h': 43_200_000,
+  '1d': 86_400_000,
+};
+
 export interface DhanProviderConfig {
   id?: string;
   displayName?: string;
@@ -102,10 +108,42 @@ export class DhanProvider implements MarketDataProvider {
 
   // ── Streams ──────────────────────────────────────────────────────────
 
-  streamCandles(): Unsub {
-    // Dhan v2 has no candle WS stream — clients should poll for live candles.
-    // The orchestrator will still publish a snapshot on subscribe via getCandles().
-    return () => undefined;
+  streamCandles(symbol: string, interval: string, onCandle: (c: Candle, isFinal: boolean) => void): Unsub {
+    const ins = findInstrument(symbol);
+    if (!ins) return () => undefined;
+
+    const ms = INTERVAL_MS[interval] ?? 60_000;
+    let current: Candle | null = null;
+
+    return this.pool.subscribe(
+      { exchangeSegment: ins.exchangeSegment, securityId: ins.securityId },
+      (tick: DhanTick) => {
+        if (typeof tick.ltp !== 'number') return;
+        const now = Date.now();
+        const openTime = Math.floor(now / ms) * ms;
+
+        if (!current || current.openTime !== openTime) {
+          if (current) onCandle(current, true);
+          current = {
+            openTime,
+            open: tick.ltp,
+            high: tick.ltp,
+            low: tick.ltp,
+            close: tick.ltp,
+            volume: typeof tick.volume === 'number' ? tick.volume : 0,
+          };
+        } else {
+          current = {
+            ...current,
+            high: Math.max(current.high, tick.ltp),
+            low: Math.min(current.low, tick.ltp),
+            close: tick.ltp,
+            volume: typeof tick.volume === 'number' ? tick.volume : current.volume,
+          };
+        }
+        onCandle(current, false);
+      },
+    );
   }
 
   streamDepth(symbol: string, onDelta: (d: DepthDelta) => void): Unsub {

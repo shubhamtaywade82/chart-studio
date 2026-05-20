@@ -15,6 +15,17 @@ import { INDICATORS, type ActiveIndicator } from './indicators/registry';
 
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
+const parseIntervalMs = (interval: string): number => {
+  const m = interval.match(/^(\d+)([mhd])$/);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  const unit = m[2];
+  if (unit === 'm') return n * 60_000;
+  if (unit === 'h') return n * 3_600_000;
+  if (unit === 'd') return n * 86_400_000;
+  return 0;
+};
+
 interface AppState {
   provider: string;
   symbol: string;
@@ -71,9 +82,8 @@ const main = (): void => {
 
   new AlertsPanel(alertEngine, () => (activeState ? { provider: activeState.provider, symbol: activeState.symbol } : null));
 
-  // Indicators - (Skipping for now while restoring lightweight-charts)
   const applyIndicators = (list: ActiveIndicator[]): void => {
-    // TODO: Re-implement indicator overlay in lightweight-charts if needed
+    chart.setIndicators(list);
   };
   indicatorPicker.onChange(applyIndicators);
 
@@ -228,6 +238,7 @@ const main = (): void => {
     writeHash(state);
     setSymbolLabels(state);
     chart.setSymbol(state.symbol);
+    chart.setIntervalMs(parseIntervalMs(state.interval));
     watchlist.setActive(state.provider, state.symbol);
     drawings.setSymbol(state.provider, state.symbol);
     renderIntervals();
@@ -296,26 +307,17 @@ const main = (): void => {
     }
     lastPrice = price;
   };
+  // updateHeaderTicker only writes bid/ask/spread — price/change are owned by updateHeaderPrice.
   const updateHeaderTicker = (bid: number, ask: number): void => {
     const hdrBid = document.getElementById('hdr-bid');
     const hdrAsk = document.getElementById('hdr-ask');
     const hdrSpread = document.getElementById('hdr-spread');
-    const hdrPrice = document.getElementById('hdr-price');
-    const hdrChange = document.getElementById('hdr-change');
     if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0) return;
     const mid = (bid + ask) / 2;
     const spread = ask - bid;
     if (hdrBid) hdrBid.textContent = fmt(bid);
     if (hdrAsk) hdrAsk.textContent = fmt(ask);
     if (hdrSpread) hdrSpread.textContent = `${fmt(spread)} (${((spread / mid) * 10_000).toFixed(2)} bps)`;
-    if (hdrPrice) hdrPrice.textContent = fmt(mid);
-    if (hdrChange && lastPrice !== null && lastPrice > 0) {
-      const pct = ((mid - lastPrice) / lastPrice) * 100;
-      hdrChange.classList.remove('bull', 'bear', 'neutral');
-      hdrChange.classList.add(pct > 0 ? 'bull' : pct < 0 ? 'bear' : 'neutral');
-      hdrChange.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%`;
-    }
-    lastPrice = mid;
   };
 
   new GlobalSearch(
@@ -364,9 +366,3 @@ const main = (): void => {
 };
 
 main();
-
-const arrEq = (a: number[], b: number[]): boolean => {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
-  return true;
-};

@@ -66,7 +66,7 @@ export class IndicatorPicker {
     el.innerHTML = `
       <div class="settings-modal" style="width: 540px;">
         <h2>Indicators</h2>
-        <p class="hint">Built-in technical indicators (klinecharts). MA/EMA/BOLL/BBI/SAR overlay the price; everything else gets a sub-pane.</p>
+        <p class="hint">Technical indicators rendered via lightweight-charts. MA/EMA/BOLL overlay the price pane; RSI and MACD get their own sub-pane.</p>
         <select id="indicator-add" class="ghost" style="width: 100%; padding: 8px;">
           <option value="">＋ Add indicator…</option>
           ${options}
