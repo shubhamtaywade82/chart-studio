@@ -296,7 +296,6 @@ export class ChartView {
 
     // Guard against updating older candles for series data only.
     if (this.lastUpdatedTime === null || t >= this.lastUpdatedTime) {
-      this.lastUpdatedTime = t;
       try {
         this.series.update({ time: t, open: c.open, high: c.high, low: c.low, close: c.close });
         this.volume.update({
@@ -304,6 +303,7 @@ export class ChartView {
           value: c.volume,
           color: c.close >= c.open ? 'rgba(46, 189, 133, 0.35)' : 'rgba(246, 70, 93, 0.35)',
         });
+        this.lastUpdatedTime = t;
       } catch (e) {
         console.warn('[chart] failed to update candle in series', e);
       }
@@ -333,8 +333,6 @@ export class ChartView {
       const t = Math.floor(newOpenTime / 1000) as UTCTimestamp;
 
       if (this.lastUpdatedTime === null || t >= this.lastUpdatedTime) {
-        this.lastUpdatedTime = t;
-        this.candles.push(newCandle);
         try {
           this.series.update({ time: t, open: price, high: price, low: price, close: price });
           this.volume.update({
@@ -342,6 +340,8 @@ export class ChartView {
             value: newCandle.volume,
             color: 'rgba(255, 255, 255, 0.18)',
           });
+          this.candles.push(newCandle);
+          this.lastUpdatedTime = t;
         } catch (e) {
           console.warn('[chart] failed to update series on rollover', e);
         }
@@ -387,8 +387,6 @@ export class ChartView {
       const t = Math.floor(openTime / 1000) as UTCTimestamp;
 
       if (this.lastUpdatedTime === null || t >= this.lastUpdatedTime) {
-        this.lastUpdatedTime = t;
-        this.candles.push(newCandle);
         try {
           this.series.update({ time: t, open: price, high: price, low: price, close: price });
           this.volume.update({
@@ -396,6 +394,8 @@ export class ChartView {
             value: newCandle.volume,
             color: 'rgba(255, 255, 255, 0.18)',
           });
+          this.candles.push(newCandle);
+          this.lastUpdatedTime = t;
         } catch (e) {
           console.warn('[chart] failed to update series on bootstrap', e);
         }
@@ -419,7 +419,6 @@ export class ChartView {
       this.ltp.setLtp(animatedPrice, color, null);
       return;
     }
-    this.lastUpdatedTime = t;
 
     try {
       // Use real high/low; only close is animated for visual smoothness.
@@ -431,6 +430,7 @@ export class ChartView {
         value: last.volume,
         color: animatedPrice >= last.open ? 'rgba(46, 189, 133, 0.35)' : 'rgba(246, 70, 93, 0.35)',
       });
+      this.lastUpdatedTime = t;
     } catch (e) {
       console.warn('[chart] failed to update series in animation loop', e);
     }

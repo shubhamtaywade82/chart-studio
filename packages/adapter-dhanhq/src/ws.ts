@@ -262,6 +262,19 @@ export class DhanStreamPool {
 
   constructor(private readonly tokens: TokenProvider, mode: 'ticker' | 'quote' | 'full' = 'full') {
     this.mode = mode === 'ticker' ? REQ_TICKER : mode === 'quote' ? REQ_QUOTE : REQ_FULL;
+
+    // Proactive WebSocket rotation: when the token provider rotates the token,
+    // we force a terminate and reconnect to use the fresh creds.
+    this.tokens.onRotate?.(() => {
+      if (this.closed) return;
+      console.log('[adapter-dhanhq] token rotated, proactively reconnecting WebSocket');
+      if (this.ws) {
+        try { this.ws.terminate(); } catch { /* noop */ }
+        // The 'close' handler will trigger automatic reconnection.
+      } else {
+        this.ensureConnected();
+      }
+    });
   }
 
   subscribe(ins: DhanSubscription, fn: Handler): () => void {

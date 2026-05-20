@@ -37,7 +37,7 @@ export class NullTokenProvider implements TokenProvider {
  */
 function decodeBase32(b32: string): Buffer {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-  const clean = b32.toUpperCase().replace(/[\s=]/g, '');
+  const clean = b32.toUpperCase().replace(/[\s=]/g, '').replace(/\s/g, '');
   const len = clean.length;
   const buffer = Buffer.alloc(Math.floor((len * 5) / 8));
   
@@ -87,6 +87,18 @@ export function generateTOTP(secret: string): string {
   return otp.padStart(6, '0');
 }
 
+function extractClientIdFromJwt(token: string): string | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3 || !parts[1]) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
+    return payload.dhanClientId ?? payload.clientId ?? payload.client_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function extractExpiryFromJwt(token: string): number | null {
   try {
     const parts = token.split('.');
@@ -116,6 +128,7 @@ export class DhanTokenManager implements TokenProvider {
   private cached: { creds: DhanCreds; expiresAt: number } | null = null;
   private inflight: Promise<DhanCreds> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private onRotateFn: ((creds: DhanCreds) => void) | null = null;
   
   private readonly authMode: string;
   private readonly clientId: string;
@@ -127,7 +140,6 @@ export class DhanTokenManager implements TokenProvider {
   private readonly cachePath: string;
   private readonly preExpiryMs: number;
   private readonly minRefreshMs: number;
-  private onRotateFn: ((creds: DhanCreds) => void) | null = null;
 
   constructor(opts: DhanTokenManagerOptions = {}) {
     this.clientId = opts.clientId ?? process.env.DHAN_CLIENT_ID ?? process.env.CLIENT_ID ?? '';
@@ -294,14 +306,13 @@ export class DhanTokenManager implements TokenProvider {
     const expiryRaw = data.expiryTime || data.expires_at;
 
     if (!accessToken) throw new Error('TOTP response missing accessToken');
-    if (!expiryRaw) throw new Error('TOTP response missing expiryTime');
 
     let expiresAt = typeof expiryRaw === 'number'
       ? (expiryRaw < 1e12 ? expiryRaw * 1000 : expiryRaw)
       : Date.parse(expiryRaw);
 
     if (isNaN(expiresAt)) {
-      throw new Error(`Invalid expiryTime parsed from response: ${expiryRaw}`);
+      expiresAt = extractExpiryFromJwt(accessToken) ?? (Date.now() + 24 * 3600_000);
     }
 
     return { accessToken, expiresAt };
@@ -330,14 +341,13 @@ export class DhanTokenManager implements TokenProvider {
     const expiryRaw = data.expiryTime || data.expires_at;
 
     if (!accessToken) throw new Error('Renew response missing accessToken');
-    if (!expiryRaw) throw new Error('Renew response missing expiryTime');
 
     let expiresAt = typeof expiryRaw === 'number'
       ? (expiryRaw < 1e12 ? expiryRaw * 1000 : expiryRaw)
       : Date.parse(expiryRaw);
 
     if (isNaN(expiresAt)) {
-      throw new Error(`Invalid expiryTime parsed from renew response: ${expiryRaw}`);
+      expiresAt = extractExpiryFromJwt(accessToken) ?? (Date.now() + 24 * 3600_000);
     }
 
     return { accessToken, expiresAt };
@@ -348,8 +358,6 @@ export class DhanTokenManager implements TokenProvider {
       throw new Error('authority strategy: TRADER_API_BASE_URL or ALGO_SCALPER_URL is missing');
     }
 
-    // Check if the authorityUrl looks like a base URL or a direct endpoint.
-    // If it is a base URL, append /auth/dhan/token. Otherwise use it directly.
     const isBaseUrl = !this.authorityUrl.includes('/token');
     const url = isBaseUrl ? `${this.authorityUrl.replace(/\/$/, '')}/auth/dhan/token` : this.authorityUrl;
 
@@ -357,7 +365,6 @@ export class DhanTokenManager implements TokenProvider {
     
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (this.authorityToken) {
-      // Use Bearer auth for new authority standard, or custom header for legacy
       if (isBaseUrl) {
         headers['Authorization'] = `Bearer ${this.authorityToken}`;
       } else {
@@ -373,7 +380,6 @@ export class DhanTokenManager implements TokenProvider {
     let expiresAt = data.expires_at || data.expiresAt || data.expiryTime;
 
     if (!accessToken) throw new Error('Authority response missing access_token');
-    if (!expiresAt) throw new Error('Authority response missing expires_at');
 
     if (typeof expiresAt === 'string') {
       expiresAt = Date.parse(expiresAt);
@@ -381,25 +387,16 @@ export class DhanTokenManager implements TokenProvider {
       expiresAt *= 1000;
     }
 
-    if (isNaN(expiresAt)) {
-      throw new Error(`Invalid expires_at parsed from authority response: ${expiresAt}`);
+    if (!expiresAt || isNaN(expiresAt)) {
+      expiresAt = extractExpiryFromJwt(accessToken) ?? (Date.now() + 24 * 3600_000);
     }
 
     return { accessToken, expiresAt };
   }
 
   private async extractClientId(token: string): Promise<string> {
-    try {
-      const parts = token.split('.');
-      if (parts.length === 3 && parts[1]) {
-        const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-        const payload = JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
-        return payload.dhanClientId || payload.clientId || payload.client_id || '';
-      }
-    } catch {
-      // Ignored, fallback to existing or empty
-    }
-    return '';
+    const cid = extractClientIdFromJwt(token);
+    return cid || '';
   }
 
   private applyTokenToRuntime(accessToken: string): void {
@@ -410,7 +407,6 @@ export class DhanTokenManager implements TokenProvider {
   private scheduleNextRefresh(expiresAt: number): void {
     if (this.timer) clearTimeout(this.timer);
     
-    // Try to refresh preExpiryMs before actual expiry
     const delay = Math.max(this.minRefreshMs, expiresAt - Date.now() - this.preExpiryMs);
     
     console.log(`[dhanhq-token] next token refresh scheduled in ${Math.round(delay / 60000)} minutes`);

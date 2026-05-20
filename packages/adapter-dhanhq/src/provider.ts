@@ -145,25 +145,30 @@ export class DhanProvider implements MarketDataProvider {
         if (typeof tick.ltp !== 'number') return;
         const now = Date.now();
         const openTime = Math.floor(now / ms) * ms;
-        const dayCumVol = typeof tick.volume === 'number' ? tick.volume : null;
+        const dayCumVol = (typeof tick.volume === 'number' && tick.volume > 0) ? tick.volume : null;
 
         if (!current || current.openTime !== openTime) {
           if (current) onCandle(current, true);
-          // Anchor base volume to current day-total so this candle's volume
-          // starts at 0 and accumulates only future tick deltas.
           baseVol = dayCumVol;
+          const initVol = (dayCumVol !== null) ? 0 : (tick.ltq ?? 0);
           current = {
             openTime,
             open: tick.ltp,
             high: tick.ltp,
             low: tick.ltp,
             close: tick.ltp,
-            volume: 0,
+            volume: initVol,
           };
         } else {
-          const candleVol = (dayCumVol !== null && baseVol !== null)
-            ? Math.max(0, dayCumVol - baseVol)
-            : current.volume;
+          let candleVol = current.volume;
+          if (dayCumVol !== null) {
+            if (baseVol === null) {
+              baseVol = dayCumVol;
+            }
+            candleVol = Math.max(0, dayCumVol - baseVol);
+          } else if (typeof tick.ltq === 'number' && tick.ltq > 0) {
+            candleVol += tick.ltq;
+          }
           current = {
             ...current,
             high: Math.max(current.high, tick.ltp),
