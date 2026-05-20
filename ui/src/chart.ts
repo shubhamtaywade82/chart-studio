@@ -439,7 +439,7 @@ export class ChartView {
       this.volume.update({
         time: t,
         value: last.volume,
-        color: animatedPrice >= last.open ? 'rgba(46, 189, 133, 0.35)' : 'rgba(246, 70, 93, 0.35)',
+        color: animatedPrice >= last.open ? 'rgba(46, 189, 133, 0.6)' : 'rgba(246, 70, 93, 0.6)',
       });
     } catch (e) {
       console.warn('[chart] animation update skipped', e);
@@ -804,3 +804,4 @@ export interface CrosshairInfo {
   volume: number | null;
   formattedPrice: string;
 }
+

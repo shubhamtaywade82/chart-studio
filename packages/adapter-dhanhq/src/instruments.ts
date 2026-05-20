@@ -76,28 +76,44 @@ const parseScripMaster = (csv: string): DhanInstrument[] => {
   const required = [cExch, cSecurityId, cSymbol, cInstrumentType];
   if (required.some((i) => i === -1)) return [];
 
-  const segmentFromRow = (exchId: string, instrumentType: string, raw?: string): string => {
-    if (raw && /^[A-Z_]+$/.test(raw)) return raw;
-    // Indices use the dedicated IDX_I segment (code 0). Routing them as
-    // NSE_EQ causes the binary feed to drop their ticks (frames come back
-    // with exchangeSegmentCode=0 but subscription keyed under NSE_EQ:13).
-    if (instrumentType === 'INDEX') return 'IDX_I';
-    if (instrumentType === 'EQUITY') {
-      if (exchId === 'NSE') return 'NSE_EQ';
-      if (exchId === 'BSE') return 'BSE_EQ';
-    }
-    if (instrumentType.startsWith('FUT') || instrumentType.startsWith('OPT')) {
-      if (exchId === 'NSE') return 'NSE_FNO';
-      if (exchId === 'BSE') return 'BSE_FNO';
-      if (exchId === 'MCX') return 'MCX_COMM';
-    }
-    if (instrumentType === 'CURRENCY') {
-      if (exchId === 'NSE') return 'NSE_CURRENCY';
-      if (exchId === 'BSE') return 'BSE_CURRENCY';
-    }
-    if (exchId === 'MCX') return 'MCX_COMM';
-    return `${exchId}_EQ`;
-  };
+const segmentFromRow = (exchId: string, instrumentType: string, raw?: string): string => {
+  if (raw && raw.includes('_')) return raw;
+  
+  const type = instrumentType.toUpperCase();
+  const exch = exchId.toUpperCase();
+
+  if (type === 'INDEX' || type === 'IDX') return 'IDX_I';
+  
+  if (type === 'EQUITY' || type === 'EQ') {
+    if (exch === 'NSE') return 'NSE_EQ';
+    if (exch === 'BSE') return 'BSE_EQ';
+  }
+  
+  if (type.startsWith('FUT') || type === 'FT' || type.startsWith('OPT') || type === 'OP') {
+    if (exch === 'NSE') return 'NSE_FNO';
+    if (exch === 'BSE') return 'BSE_FNO';
+    if (exch === 'MCX') return 'MCX_COMM';
+  }
+  
+  if (type === 'CURRENCY' || type === 'CUR') {
+    if (exch === 'NSE') return 'NSE_CURRENCY';
+    if (exch === 'BSE') return 'BSE_CURRENCY';
+  }
+  
+  if (exch === 'MCX') return 'MCX_COMM';
+  return `${exch}_${type || 'EQ'}`;
+};
+
+const segmentLabelFor = (instrumentType: string): string => {
+  const type = instrumentType.toUpperCase();
+  if (type === 'EQUITY' || type === 'EQ') return 'equity';
+  if (type === 'INDEX' || type === 'IDX') return 'index';
+  if (type.startsWith('FUT') || type === 'FT') return 'futures';
+  if (type.startsWith('OPT') || type === 'OP') return 'option';
+  if (type === 'COMMODITY' || type === 'COM') return 'commodity';
+  if (type === 'CURRENCY' || type === 'CUR') return 'currency';
+  return type.toLowerCase();
+};
 
   const out: DhanInstrument[] = [];
   for (let i = 1; i < lines.length; i += 1) {
@@ -229,12 +245,41 @@ export const toInstrumentMeta = (providerId: string, ins: DhanInstrument): Instr
 export const searchInstruments = (rows: DhanInstrument[], query: string, limit: number): DhanInstrument[] => {
   const q = query.trim().toUpperCase();
   if (!q) return rows.slice(0, limit);
-  const out: DhanInstrument[] = [];
+  
+  // Two-pass search: first collect high-priority segments (Equity/Index),
+  // then fill remaining slots with others (FNO/Commodity).
+  const highPriority: DhanInstrument[] = [];
+  const lowPriority: DhanInstrument[] = [];
+
   for (const r of rows) {
+    const isExactSymbol = r.symbolName.toUpperCase() === q;
     const hay = `${r.symbolName} ${r.displayName} ${r.exchangeSegment}`.toUpperCase();
-    if (hay.includes(q)) out.push(r);
-    if (out.length >= limit) break;
+    
+    if (hay.includes(q)) {
+      const seg = r.exchangeSegment;
+      const type = r.instrumentType.toUpperCase();
+      // Only prioritize true Equity and Indices
+      const isHigh = (seg === 'NSE_EQ' || seg === 'BSE_EQ' || seg === 'IDX_I') && 
+                     (type === 'EQUITY' || type === 'EQ' || type === 'INDEX' || type === 'IDX');
+      
+      if (isHigh || isExactSymbol) {
+        highPriority.push(r);
+      } else {
+        // Collect a limited amount of low priority to avoid massive memory usage
+        // but enough to give the gateway something to rank.
+        if (lowPriority.length < limit * 3) {
+          lowPriority.push(r);
+        }
+      }
+    }
+    
+    // If we have enough high priority, we can potentially stop early,
+    // but usually we want to see all equity matches.
+    if (highPriority.length > limit * 2) break;
   }
-  return out;
+
+  // Combine and truncate
+  const combined = [...highPriority, ...lowPriority];
+  return combined.slice(0, limit);
 };
 

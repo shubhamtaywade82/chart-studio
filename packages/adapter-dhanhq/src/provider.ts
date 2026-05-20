@@ -136,21 +136,32 @@ export class DhanProvider implements MarketDataProvider {
   streamCandles(symbol: string, interval: string, onCandle: (c: Candle, isFinal: boolean) => void): Unsub {
     const ms = INTERVAL_MS[interval] ?? 60_000;
     let current: Candle | null = null;
-    /** Day cumulative volume at this candle's open; subtracted to derive candle volume. */
-    let baseVol: number | null = null;
+    /** Day cumulative volume at the exact moment THIS candle started. */
+    let candleStartDayVol: number | null = null;
+    /** Last seen day cumulative volume to carry over as base for next candle. */
+    let lastDayVol: number | null = null;
 
     return this.deferredSubscribe(symbol, (ins) => this.pool.subscribe(
       { exchangeSegment: ins.exchangeSegment, securityId: ins.securityId },
       (tick: DhanTick) => {
         if (typeof tick.ltp !== 'number') return;
-        const now = Date.now();
-        const openTime = Math.floor(now / ms) * ms;
+        
+        // Use exchange-provided tick time (ltt) if available, fallback to local now.
+        const tsMs = tick.ltt ? tick.ltt * 1000 : tick.ts;
+        const openTime = Math.floor(tsMs / ms) * ms;
         const dayCumVol = (typeof tick.volume === 'number' && tick.volume > 0) ? tick.volume : null;
 
         if (!current || current.openTime !== openTime) {
           if (current) onCandle(current, true);
-          baseVol = dayCumVol;
-          const initVol = (dayCumVol !== null) ? 0 : (tick.ltq ?? 0);
+          
+          // Carry over last seen volume as the base for the new candle.
+          // If we haven't seen any volume yet, this first tick's volume becomes the base (initVol=0).
+          candleStartDayVol = (dayCumVol !== null) ? (lastDayVol ?? dayCumVol) : null;
+          
+          const initVol = (dayCumVol !== null && candleStartDayVol !== null)
+            ? Math.max(0, dayCumVol - candleStartDayVol)
+            : (tick.ltq ?? 0);
+
           current = {
             openTime,
             open: tick.ltp,
@@ -162,10 +173,10 @@ export class DhanProvider implements MarketDataProvider {
         } else {
           let candleVol = current.volume;
           if (dayCumVol !== null) {
-            if (baseVol === null) {
-              baseVol = dayCumVol;
+            if (candleStartDayVol === null) {
+              candleStartDayVol = dayCumVol;
             }
-            candleVol = Math.max(0, dayCumVol - baseVol);
+            candleVol = Math.max(0, dayCumVol - candleStartDayVol);
           } else if (typeof tick.ltq === 'number' && tick.ltq > 0) {
             candleVol += tick.ltq;
           }
@@ -177,6 +188,8 @@ export class DhanProvider implements MarketDataProvider {
             volume: candleVol,
           };
         }
+        
+        if (dayCumVol !== null) lastDayVol = dayCumVol;
         onCandle(current, false);
       },
     ));
