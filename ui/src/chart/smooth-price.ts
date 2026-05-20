@@ -49,6 +49,18 @@ export class SmoothPriceAnimator {
     return this.target;
   }
 
+  /** Cancel any running animation and reset state without triggering updates. */
+  reset(): void {
+    if (this.frameId !== null) {
+      cancelAnimationFrame(this.frameId);
+      this.frameId = null;
+    }
+    this.current = 0;
+    this.target = 0;
+    this.startPrice = 0;
+    this.startTime = 0;
+  }
+
   getPrice(): number {
     return this.current;
   }

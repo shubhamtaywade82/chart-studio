@@ -250,7 +250,7 @@ export class ChartView {
 
   setHistory(candles: Candle[]): void {
     this.candles = [...candles].sort((a, b) => a.openTime - b.openTime);
-    this.ltpAnimator.flush();
+    this.ltpAnimator.reset();
 
     let precision = 2;
     if (this.candles.length > 0) {
@@ -344,7 +344,8 @@ export class ChartView {
   }
 
   clearLastTradePrice(): void {
-    this.ltpAnimator.flush();
+    this.candles = [];
+    this.ltpAnimator.reset();
     this.ltp.setLtp(null, '#2ebd85', null);
   }
 
@@ -643,7 +644,7 @@ export class ChartView {
   }
 
   dispose(): void {
-    this.ltpAnimator.flush();
+    this.ltpAnimator.reset();
     this.resizeObs.disconnect();
     // Detach LTP primitive so its requestUpdate callback can't fire on a
     // disposed chart.

@@ -369,6 +369,11 @@ export class DhanStreamPool {
       if (!(raw instanceof Buffer)) return;
       this.lastFrameAt = Date.now();
 
+      if (raw.length >= 1) {
+        const code = raw.readUInt8(0);
+        console.log(`[adapter-dhanhq] WebSocket frame received: code=${code}, length=${raw.length} bytes`);
+      }
+
       // Validate header length field if present. Reject obviously truncated frames
       // so we don't read garbage past the buffer end.
       if (raw.length >= 8) {
