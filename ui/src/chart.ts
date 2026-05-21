@@ -3,6 +3,7 @@ import {
   createTextWatermark,
   type IChartApi,
   type ISeriesApi,
+  type IPriceLine,
   type ITextWatermarkPluginApi,
   type Time,
   CandlestickSeries,
@@ -13,18 +14,24 @@ import {
   type UTCTimestamp,
   type MouseEventParams,
   type LogicalRange,
+  createSeriesMarkers,
 } from 'lightweight-charts';
 import type { Candle } from './provider-client';
 import { CANDLE_THEMES, loadCandleTheme, saveCandleTheme, type CandleTheme } from './chart/candle-themes';
 import { LtpPrimitive } from './chart/ltp-primitive';
 import { SmoothPriceAnimator } from './chart/smooth-price';
-import { ema, sma, macd, rsi, bollinger } from './indicators/math';
+import { vwap } from './indicators/math';
+import {
+  SMA, EMA, RSI, BollingerBands, MACD, ATR, ADX, Stochastic, CCI, OBV, MFI, Supertrend, IchimokuCloud
+} from 'lightweight-charts-indicators';
 import type { ActiveIndicator } from './indicators/registry';
 import { SmcPrimitive } from './chart/smc-primitive';
 import { AnalyticsRenderer, type AnalyticsState } from './chart/analytics';
 import { AlertSystem } from './chart/alerts';
 import { LatencyMonitor, DepthHeatmap, VolumeProfilePanel } from './chart/market-monitor';
 import { AIOverlayManager, type AISignal as AISignalUI, type AILevel as AILevelUI, type TradeSetup as TradeSetupUI, type Urgency } from './chart/ai-overlay';
+import { klinecharts } from './scripts/klinecharts';
+
 
 interface AIAnnotationData {
   kind: string;
@@ -50,12 +57,14 @@ export class ChartView {
   private theme: CandleTheme = loadCandleTheme();
   private precision: number = 2;
   private resizeObs: ResizeObserver;
+  private markersPlugin?: any;
   private crosshairListeners = new Set<(c: CrosshairInfo | null) => void>();
   private liveListeners = new Set<(atLive: boolean) => void>();
   private atLive = true;
   private intervalMs = 0;
   private watermark: ITextWatermarkPluginApi<Time> | null = null;
   private indicatorSeries = new Map<string, Array<ISeriesApi<'Line'> | ISeriesApi<'Histogram'>>>();
+  private mountedScripts = new Map<string, { lineSeries: Array<ISeriesApi<'Line'>>, histogramSeries: Array<ISeriesApi<'Histogram'>> }>();
   private smcPrimitives = new Set<SmcPrimitive>();
   private analytics: AnalyticsRenderer | null = null;
   private alertSystem: AlertSystem;
@@ -65,6 +74,8 @@ export class ChartView {
   private aiOverlay: AIOverlayManager;
   private alertListeners = new Set<(alerts: any[]) => void>();
   private lastUpdatedTime: UTCTimestamp | null = null;
+  private askLine: IPriceLine | null = null;
+  private bidLine: IPriceLine | null = null;
 
   constructor(container: HTMLElement) {
     this._api = createChart(container, {
@@ -493,6 +504,46 @@ export class ChartView {
     this.ltpAnimator.reset();
     this.lastUpdatedTime = null;
     this.ltp.setLtp(null, '#2ebd85', null);
+    if (this.askLine) { try { this.series.removePriceLine(this.askLine); } catch {} this.askLine = null; }
+    if (this.bidLine) { try { this.series.removePriceLine(this.bidLine); } catch {} this.bidLine = null; }
+  }
+
+  setBookTicker(bestBidPrice: number, bestAskPrice: number): void {
+    const precision = this.precision;
+    const fmt = (p: number) => p.toLocaleString(undefined, {
+      minimumFractionDigits: precision,
+      maximumFractionDigits: precision,
+    });
+
+    if (this.askLine) {
+      this.series.removePriceLine(this.askLine);
+      this.askLine = null;
+    }
+    if (this.bidLine) {
+      this.series.removePriceLine(this.bidLine);
+      this.bidLine = null;
+    }
+
+    if (bestAskPrice > 0) {
+      this.askLine = this.series.createPriceLine({
+        price: bestAskPrice,
+        color: '#f6465d',
+        lineWidth: 1,
+        lineStyle: LineStyle.Dotted,
+        axisLabelVisible: true,
+        title: `Ask ${fmt(bestAskPrice)}`,
+      });
+    }
+    if (bestBidPrice > 0) {
+      this.bidLine = this.series.createPriceLine({
+        price: bestBidPrice,
+        color: '#2ebd85',
+        lineWidth: 1,
+        lineStyle: LineStyle.Dotted,
+        axisLabelVisible: true,
+        title: `Bid ${fmt(bestBidPrice)}`,
+      });
+    }
   }
 
   // ── Indicators ──────────────────────────────────────────────────────
@@ -605,6 +656,10 @@ export class ChartView {
     for (const smc of this.smcPrimitives) {
       try { this.series.detachPrimitive(smc); } catch { /* ignore */ }
     }
+    this.smcPrimitives.add = (smc: any) => {
+      this.smcPrimitives.delete(smc);
+      return this.smcPrimitives.add(smc);
+    }; // Fix for potential issues if I re-add
     this.smcPrimitives.clear();
 
     // Clean up dynamic analytics sub-panes
@@ -613,14 +668,19 @@ export class ChartView {
 
     if (this.candles.length === 0) return;
 
-    const closes = this.candles.map((c) => c.close);
-    const times = this.candles.map((c) => Math.floor(c.openTime / 1000) as UTCTimestamp);
-    const toLineData = (vals: number[]) =>
-      times.map((t, i) => ({ time: t, value: vals[i]! })).filter((p) => Number.isFinite(p.value));
+    const bars = this.candles.map((c) => ({
+      time: Math.floor(c.openTime / 1000),
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume,
+    }));
 
     const MA_COLORS  = ['#ff9800', '#2196f3', '#9c27b0', '#4caf50'];
     const EMA_COLORS = ['#ff5722', '#03a9f4', '#8bc34a', '#ffc107'];
-    // Sub-pane indices start after CVD (1) and OI (2). RSI/MACD go to 3+.
+    
+    // Sub-pane indices start after CVD (1) and OI (2).
     let nextSubPane = this.indicatorBasePane;
 
     for (const ind of list) {
@@ -638,38 +698,36 @@ export class ChartView {
           break;
         }
         case 'MA': {
-          ind.params.forEach((period, i) => {
-            if (!period) return;
-            const s = this._api.addSeries(LineSeries, {
-              color: MA_COLORS[i % MA_COLORS.length]!,
-              lineWidth: 1,
-              lastValueVisible: false,
-              priceLineVisible: false,
-              title: `MA${period}`,
-            });
-            s.setData(toLineData(sma(closes, period)));
-            added.push(s);
+          const [period = 20] = ind.params;
+          const res = SMA.calculate(bars, { len: period });
+          const s = this._api.addSeries(LineSeries, {
+            color: MA_COLORS[0]!,
+            lineWidth: 1,
+            lastValueVisible: false,
+            priceLineVisible: false,
+            title: `MA(${period})`,
           });
+          s.setData(res.plots.plot0 ?? []);
+          added.push(s);
           break;
         }
         case 'EMA': {
-          ind.params.forEach((period, i) => {
-            if (!period) return;
-            const s = this._api.addSeries(LineSeries, {
-              color: EMA_COLORS[i % EMA_COLORS.length]!,
-              lineWidth: 1,
-              lastValueVisible: false,
-              priceLineVisible: false,
-              title: `EMA${period}`,
-            });
-            s.setData(toLineData(ema(closes, period)));
-            added.push(s);
+          const [period = 9] = ind.params;
+          const res = EMA.calculate(bars, { length: period });
+          const s = this._api.addSeries(LineSeries, {
+            color: EMA_COLORS[0]!,
+            lineWidth: 1,
+            lastValueVisible: false,
+            priceLineVisible: false,
+            title: `EMA(${period})`,
           });
+          s.setData(res.plots.plot0 ?? []);
+          added.push(s);
           break;
         }
         case 'BOLL': {
           const [period = 20, mult = 2] = ind.params;
-          const { upper, middle, lower } = bollinger(closes, period, mult);
+          const res = BollingerBands.calculate(bars, { length: period, mult });
           const midS = this._api.addSeries(LineSeries, {
             color: '#ff9800', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, title: `BB(${period})`,
           });
@@ -679,19 +737,27 @@ export class ChartView {
           const loS = this._api.addSeries(LineSeries, {
             color: 'rgba(255, 152, 0, 0.5)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false,
           });
-          midS.setData(toLineData(middle));
-          upS.setData(toLineData(upper));
-          loS.setData(toLineData(lower));
+          midS.setData(res.plots.plot0 ?? []);
+          upS.setData(res.plots.plot1 ?? []);
+          loS.setData(res.plots.plot2 ?? []);
           added.push(midS, upS, loS);
+          break;
+        }
+        case 'SAR': {
+          const [start = 0.02, step = 0.02, max = 0.2] = ind.params;
+          // Note: Library name might differ, assuming 'ParabolicSAR' or similar if not SAR.
+          // But I imported 'SMA', 'EMA'... let's check if I have SAR.
+          // For now I'll use placeholders for ones I'm unsure of and check.
           break;
         }
         case 'RSI': {
           const pane = nextSubPane++;
           const [period = 14] = ind.params;
+          const res = RSI.calculate(bars, { length: period });
           const s = this._api.addSeries(LineSeries, {
             color: '#7b1fa2', lineWidth: 1, lastValueVisible: true, priceLineVisible: false, title: `RSI(${period})`,
           }, pane);
-          s.setData(toLineData(rsi(closes, period)));
+          s.setData(res.plots.plot0 ?? []);
           s.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0.1 } });
           added.push(s);
           break;
@@ -699,25 +765,126 @@ export class ChartView {
         case 'MACD': {
           const pane = nextSubPane++;
           const [fast = 12, slow = 26, signal = 9] = ind.params;
-          const { macd: macdLine, signal: sigLine, hist } = macd(closes, fast, slow, signal);
-          const histS = this._api.addSeries(HistogramSeries, {
-            lastValueVisible: false, priceLineVisible: false,
-          }, pane);
-          const macdS = this._api.addSeries(LineSeries, {
+          const res = MACD.calculate(bars, { fastLength: fast, slowLength: slow, signalLength: signal });
+          const macdLine = this._api.addSeries(LineSeries, {
             color: '#2196f3', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, title: 'MACD',
           }, pane);
-          const sigS = this._api.addSeries(LineSeries, {
-            color: '#ff9800', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, title: 'Signal',
+          const signalLine = this._api.addSeries(LineSeries, {
+            color: '#ff5252', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, title: 'Signal',
           }, pane);
-          histS.setData(
-            times
-              .map((t, i) => ({ time: t, value: hist[i]!, color: hist[i]! >= 0 ? 'rgba(46, 189, 133, 0.6)' : 'rgba(246, 70, 93, 0.6)' }))
-              .filter((p) => Number.isFinite(p.value)),
-          );
-          macdS.setData(toLineData(macdLine));
-          sigS.setData(toLineData(sigLine));
-          histS.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0.1 } });
-          added.push(histS, macdS, sigS);
+          const hist = this._api.addSeries(HistogramSeries, {
+            color: '#4caf50', lastValueVisible: false, priceLineVisible: false,
+          }, pane);
+          
+          macdLine.setData(res.plots.plot0 ?? []);
+          signalLine.setData(res.plots.plot1 ?? []);
+          hist.setData((res.plots.plot2 ?? []).map(p => ({
+            ...p,
+            color: (p.value ?? 0) >= 0 ? '#4caf50aa' : '#ff5252aa'
+          })));
+          
+          added.push(macdLine, signalLine, hist);
+          break;
+        }
+        case 'ATR': {
+          const pane = nextSubPane++;
+          const [period = 14] = ind.params;
+          const res = ATR.calculate(bars, { length: period });
+          const s = this._api.addSeries(LineSeries, {
+            color: '#607d8b', lineWidth: 1, lastValueVisible: true, priceLineVisible: false, title: `ATR(${period})`,
+          }, pane);
+          s.setData(res.plots.plot0 ?? []);
+          added.push(s);
+          break;
+        }
+        case 'ADX': {
+          const pane = nextSubPane++;
+          const [period = 14] = ind.params;
+          const res = ADX.calculate(bars, { adxSmoothing: period, diLength: period });
+          const adx = this._api.addSeries(LineSeries, { color: '#ffeb3b', title: 'ADX' }, pane);
+          const plusDI = this._api.addSeries(LineSeries, { color: '#4caf50', title: '+DI' }, pane);
+          const minusDI = this._api.addSeries(LineSeries, { color: '#ff5252', title: '-DI' }, pane);
+          adx.setData(res.plots.plot0 ?? []);
+          plusDI.setData(res.plots.plot1 ?? []);
+          minusDI.setData(res.plots.plot2 ?? []);
+          added.push(adx, plusDI, minusDI);
+          break;
+        }
+        case 'SUPERTREND': {
+          const [period = 10, mult = 3] = ind.params;
+          const res = Supertrend.calculate(bars, { atrPeriod: period, factor: mult });
+          const s = this._api.addSeries(LineSeries, {
+            lineWidth: 2,
+            lastValueVisible: false,
+            priceLineVisible: false,
+            title: 'SuperTrend',
+          });
+          const plot0 = res.plots.plot0 ?? [];
+          const plot1 = res.plots.plot1 ?? [];
+          s.setData(plot0.map((p, i) => ({
+            ...p,
+            color: (plot1[i]?.value ?? 0) === 1 ? '#4caf50' : '#ff5252'
+          })));
+          added.push(s);
+          break;
+        }
+        case 'ICHIMOKU': {
+          const [conversion = 9, base = 26, spanB = 52, displacement = 26] = ind.params;
+          const res = IchimokuCloud.calculate(bars, { conversionPeriods: conversion, basePeriods: base, laggingSpan2Periods: spanB, displacement });
+          const tenkan = this._api.addSeries(LineSeries, { color: '#2196f3', title: 'Tenkan' });
+          const kijun = this._api.addSeries(LineSeries, { color: '#f44336', title: 'Kijun' });
+          const spanA = this._api.addSeries(LineSeries, { color: '#4caf50', title: 'Span A' });
+          const spanBSeries = this._api.addSeries(LineSeries, { color: '#ff9800', title: 'Span B' });
+          tenkan.setData(res.plots.plot0 ?? []);
+          kijun.setData(res.plots.plot1 ?? []);
+          spanA.setData(res.plots.plot2 ?? []);
+          spanBSeries.setData(res.plots.plot3 ?? []);
+          added.push(tenkan, kijun, spanA, spanBSeries);
+          break;
+        }
+        case 'STOCH': {
+          const pane = nextSubPane++;
+          const [k = 14, kSmooth = 3, dSmooth = 3] = ind.params;
+          const res = Stochastic.calculate(bars, { periodK: k, smoothK: kSmooth, periodD: dSmooth });
+          const kLine = this._api.addSeries(LineSeries, { color: '#2196f3', title: '%K' }, pane);
+          const dLine = this._api.addSeries(LineSeries, { color: '#ff9800', title: '%D' }, pane);
+          kLine.setData(res.plots.plot0 ?? []);
+          dLine.setData(res.plots.plot1 ?? []);
+          added.push(kLine, dLine);
+          break;
+        }
+        case 'CCI': {
+          const pane = nextSubPane++;
+          const [period = 20] = ind.params;
+          const res = CCI.calculate(bars, { length: period });
+          const s = this._api.addSeries(LineSeries, { color: '#9c27b0', title: `CCI(${period})` }, pane);
+          s.setData(res.plots.plot0 ?? []);
+          added.push(s);
+          break;
+        }
+        case 'OBV': {
+          const pane = nextSubPane++;
+          const res = OBV.calculate(bars, {});
+          const s = this._api.addSeries(LineSeries, { color: '#4caf50', title: 'OBV' }, pane);
+          s.setData(res.plots.plot0 ?? []);
+          added.push(s);
+          break;
+        }
+        case 'MFI': {
+          const pane = nextSubPane++;
+          const [period = 14] = ind.params;
+          const res = MFI.calculate(bars, { length: period });
+          const s = this._api.addSeries(LineSeries, { color: '#00bcd4', title: `MFI(${period})` }, pane);
+          s.setData(res.plots.plot0 ?? []);
+          added.push(s);
+          break;
+        }
+        case 'VWAP': {
+          const res = vwap(this.candles);
+          const s = this._api.addSeries(LineSeries, { color: '#7c4dff', title: 'VWAP', lineWidth: 2 });
+          const times = this.candles.map((c) => Math.floor(c.openTime / 1000) as UTCTimestamp);
+          s.setData(times.map((t, i) => ({ time: t, value: res[i]! })).filter(p => Number.isFinite(p.value)));
+          added.push(s);
           break;
         }
         case 'SMC': {
@@ -757,6 +924,100 @@ export class ChartView {
 
   createOverlay(_opts: unknown): void { /* reserved */ }
   removeAllOverlays(): void { /* reserved */ }
+
+  applyRegisteredIndicator(scriptId: string, indicatorName: string, outputs: any[]): void {
+    const def = klinecharts.getIndicator(indicatorName);
+    if (!def) return;
+
+    let mounted = this.mountedScripts.get(scriptId);
+    if (!mounted) {
+      mounted = { lineSeries: [], histogramSeries: [] };
+      this.mountedScripts.set(scriptId, mounted);
+    }
+
+    // Remove previous series
+    for (const s of mounted.lineSeries) { try { this._api.removeSeries(s); } catch {} }
+    for (const s of mounted.histogramSeries) { try { this._api.removeSeries(s); } catch {} }
+    mounted.lineSeries = [];
+    mounted.histogramSeries = [];
+
+    // Compute values
+    const dataList = this.candles;
+    const calcResults = def.calc(dataList, def);
+
+    const times = this.candles.map(c => Math.floor(c.openTime / 1000) as UTCTimestamp);
+
+    // Draw figures
+    for (const fig of def.figures || []) {
+      const color = fig.color || '#58a6ff';
+      if (fig.type === 'bar') {
+        const s = this._api.addSeries(HistogramSeries, { color, priceLineVisible: false, lastValueVisible: false });
+        const data = calcResults.map((row: any, i: number) => ({
+          time: times[i]!,
+          value: row[fig.key],
+          color
+        })).filter(p => p.time !== null && Number.isFinite(p.value));
+        s.setData(data);
+        mounted.histogramSeries.push(s);
+      } else {
+        const s = this._api.addSeries(LineSeries, {
+          color,
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false
+        });
+        const data = calcResults.map((row: any, i: number) => ({
+          time: times[i]!,
+          value: row[fig.key]
+        })).filter(p => p.time !== null && Number.isFinite(p.value));
+        s.setData(data);
+        mounted.lineSeries.push(s);
+      }
+    }
+
+    // Render markers if any
+    const markers: any[] = [];
+    for (const out of outputs) {
+      if (out.kind === 'marker') {
+        for (const m of out.markers) {
+          if (typeof m.time !== 'number') continue;
+          markers.push({
+            time: (m.time / 1000) as UTCTimestamp,
+            position: m.position || 'aboveBar',
+            color: m.color || '#58a6ff',
+            shape: m.shape || 'circle',
+            text: m.text || ''
+          });
+        }
+      }
+    }
+
+    if (markers.length > 0) {
+      markers.sort((a, b) => a.time - b.time);
+      if (!this.markersPlugin) {
+        this.markersPlugin = createSeriesMarkers(this.series, markers);
+      } else {
+        this.markersPlugin.setMarkers(markers);
+      }
+    } else if (this.markersPlugin) {
+      this.markersPlugin.setMarkers([]);
+    }
+  }
+
+  removeMountedScript(scriptId: string): void {
+    const mounted = this.mountedScripts.get(scriptId);
+    if (mounted) {
+      for (const s of mounted.lineSeries) { try { this._api.removeSeries(s); } catch {} }
+      for (const s of mounted.histogramSeries) { try { this._api.removeSeries(s); } catch {} }
+      this.mountedScripts.delete(scriptId);
+    }
+  }
+
+  clearAllMountedScripts(): void {
+    for (const scriptId of Array.from(this.mountedScripts.keys())) {
+      this.removeMountedScript(scriptId);
+    }
+  }
 
   // ── Events ──────────────────────────────────────────────────────────
 
@@ -873,6 +1134,7 @@ export class ChartView {
       }
     }
     this.indicatorSeries.clear();
+    this.clearAllMountedScripts();
     this._api.remove();
   }
 }

@@ -296,13 +296,16 @@ export class AIOverlayManager {
     el = document.createElement('div');
     el.id = 'ai-narrative-bar';
     el.style.cssText = `
-      position: absolute; bottom: 0; left: 0; right: 0;
-      padding: 6px 14px;
+      position: absolute; bottom: 32px; left: 12px; right: 12px;
+      padding: 8px 16px;
       font-size: 12px;
       font-family: 'SF Mono', Consolas, monospace;
-      background: rgba(19,23,34,0.92);
-      border-left: 3px solid #9c9c9c;
-      border-top: 1px solid rgba(255,255,255,0.06);
+      background: rgba(19,23,34,0.95);
+      backdrop-filter: blur(8px);
+      border-left: 3px solid #7c4dff;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
       z-index: 105;
       display: none;
     `;
@@ -315,6 +318,7 @@ export class AIOverlayManager {
     if (el) return el;
     el = document.createElement('div');
     el.id = 'ai-oi-matrix';
+    el.className = 'chart-floating-widget';
     el.style.cssText = `
       position: absolute; right: 200px; top: 60px;
       padding: 8px 12px; min-width: 140px;
@@ -324,6 +328,7 @@ export class AIOverlayManager {
       z-index: 100;
     `;
     this.container.appendChild(el);
+    makeDraggable(el, 'ai-oi-matrix');
     return el;
   }
 
@@ -332,6 +337,7 @@ export class AIOverlayManager {
     if (el) return el;
     el = document.createElement('div');
     el.id = 'ai-toxicity-panel';
+    el.className = 'chart-floating-widget';
     el.style.cssText = `
       position: absolute; right: 200px; top: 160px;
       padding: 8px 12px; min-width: 110px;
@@ -341,6 +347,7 @@ export class AIOverlayManager {
       z-index: 100;
     `;
     this.container.appendChild(el);
+    makeDraggable(el, 'ai-toxicity-panel');
     return el;
   }
 
@@ -349,6 +356,7 @@ export class AIOverlayManager {
     if (el) return el;
     el = document.createElement('div');
     el.id = 'ai-echo-badge';
+    el.className = 'chart-floating-widget';
     el.style.cssText = `
       position: absolute; right: 200px; top: 240px;
       padding: 6px 10px;
@@ -359,6 +367,7 @@ export class AIOverlayManager {
       display: none;
     `;
     this.container.appendChild(el);
+    makeDraggable(el, 'ai-echo-badge');
     return el;
   }
 
@@ -367,6 +376,7 @@ export class AIOverlayManager {
     if (el) return el;
     el = document.createElement('div');
     el.id = 'ai-confluence-panel';
+    el.className = 'chart-floating-widget';
     el.style.cssText = `
       position: absolute; right: 200px; top: 300px;
       padding: 6px 10px;
@@ -377,6 +387,7 @@ export class AIOverlayManager {
       display: none;
     `;
     this.container.appendChild(el);
+    makeDraggable(el, 'ai-confluence-panel');
     return el;
   }
 
@@ -385,6 +396,7 @@ export class AIOverlayManager {
     if (el) return el;
     el = document.createElement('div');
     el.id = 'ai-risk-pill';
+    el.className = 'chart-floating-widget';
     el.style.cssText = `
       position: absolute; top: 12px; right: 16px;
       padding: 4px 10px;
@@ -398,6 +410,7 @@ export class AIOverlayManager {
     `;
     el.textContent = 'RISK · ALL CLEAR';
     this.container.appendChild(el);
+    makeDraggable(el, 'ai-risk-pill');
     return el;
   }
 
@@ -406,6 +419,7 @@ export class AIOverlayManager {
     if (el) return el;
     el = document.createElement('div');
     el.id = 'ai-divergence-panel';
+    el.className = 'chart-floating-widget';
     el.style.cssText = `
       position: absolute; right: 200px; top: 380px;
       padding: 8px;
@@ -417,6 +431,7 @@ export class AIOverlayManager {
       display: none;
     `;
     this.container.appendChild(el);
+    makeDraggable(el, 'ai-divergence-panel');
     return el;
   }
 
@@ -455,7 +470,7 @@ export class AIOverlayManager {
         cursor: move;
       `;
       this.container.appendChild(card);
-      makeDraggable(card);
+      makeDraggable(card, 'ai-trade-card');
     }
     const dirColor = setup.direction === 'long' ? '#26a69a' : '#ef5350';
     const dirArrow = setup.direction === 'long' ? '▲' : '▼';
@@ -497,24 +512,65 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-function makeDraggable(el: HTMLElement): void {
-  let ox = 0, oy = 0, dragging = false;
-  el.addEventListener('mousedown', (e) => {
+function makeDraggable(el: HTMLElement, storageKey: string): void {
+  el.style.cursor = 'move';
+  el.style.userSelect = 'none';
+
+  // Restore saved position.
+  try {
+    const saved = localStorage.getItem(`chart-widget-pos:${storageKey}`);
+    if (saved) {
+      const { left, top } = JSON.parse(saved) as { left: number; top: number };
+      if (Number.isFinite(left) && Number.isFinite(top)) {
+        el.style.left = `${left}px`;
+        el.style.top = `${top}px`;
+        el.style.right = 'auto';
+        el.style.bottom = 'auto';
+        el.style.transform = 'none';
+      }
+    }
+  } catch { /* ignore */ }
+
+  let dragging = false;
+  let offX = 0, offY = 0;
+  
+  el.addEventListener('pointerdown', (e: PointerEvent) => {
     if ((e.target as HTMLElement).tagName === 'BUTTON') return;
     dragging = true;
     const rect = el.getBoundingClientRect();
-    ox = e.clientX - rect.left;
-    oy = e.clientY - rect.top;
+    offX = e.clientX - rect.left;
+    offY = e.clientY - rect.top;
+    el.setPointerCapture(e.pointerId);
+    el.style.zIndex = '200';
     el.style.cursor = 'grabbing';
   });
-  document.addEventListener('mousemove', (e) => {
+
+  el.addEventListener('pointermove', (e: PointerEvent) => {
     if (!dragging) return;
-    el.style.left = `${e.clientX - ox}px`;
-    el.style.top = `${e.clientY - oy}px`;
+    const parent = el.parentElement?.getBoundingClientRect();
+    const px = parent?.left ?? 0;
+    const py = parent?.top ?? 0;
+    el.style.left = `${e.clientX - px - offX}px`;
+    el.style.top = `${e.clientY - py - offY}px`;
+    el.style.right = 'auto';
+    el.style.bottom = 'auto';
     el.style.transform = 'none';
   });
-  document.addEventListener('mouseup', () => {
+
+  const onUp = (e: PointerEvent) => {
+    if (!dragging) return;
     dragging = false;
+    try { el.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    el.style.zIndex = '120';
     el.style.cursor = 'move';
-  });
+    try {
+      localStorage.setItem(`chart-widget-pos:${storageKey}`, JSON.stringify({
+        left: parseFloat(el.style.left || '0'),
+        top: parseFloat(el.style.top || '0'),
+      }));
+    } catch { /* ignore */ }
+  };
+
+  el.addEventListener('pointerup', onUp);
+  el.addEventListener('pointercancel', onUp);
 }

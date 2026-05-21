@@ -8,13 +8,16 @@ const sortAsc = (a: Level, b: Level): number => a.price - b.price;
 export class OrderBookPanel {
   private bids = new Map<number, number>();
   private asks = new Map<number, number>();
+  private prevSizes = new Map<number, number>();
   private depth = 12;
+  private renderRequested = false;
 
   constructor(private readonly root: HTMLElement, private readonly spreadEl: HTMLElement) {}
 
   reset(snapshot: OrderBookSnapshot | null): void {
     this.bids.clear();
     this.asks.clear();
+    this.prevSizes.clear();
     if (snapshot) {
       if (snapshot.bids) {
         for (const [p, q] of snapshot.bids) if (q > 0) this.bids.set(p, q);
@@ -23,7 +26,7 @@ export class OrderBookPanel {
         for (const [p, q] of snapshot.asks) if (q > 0) this.asks.set(p, q);
       }
     }
-    this.render();
+    this.requestRender();
   }
 
   applyDelta(delta: DepthDelta): void {
@@ -43,7 +46,7 @@ export class OrderBookPanel {
         else this.asks.set(p, q);
       }
     }
-    this.render();
+    this.requestRender();
   }
 
   getSnapshot(): { bids: Array<[number, number]>; asks: Array<[number, number]> } {
@@ -63,36 +66,96 @@ export class OrderBookPanel {
     return arr.slice(0, n);
   }
 
-  private render(): void {
+  private requestRender(): void {
+    if (this.renderRequested) return;
+    this.renderRequested = true;
+    requestAnimationFrame(() => {
+      this.renderRequested = false;
+      this.renderSync();
+    });
+  }
+
+  private renderSync(): void {
     const askRows = this.topLevels(this.asks, this.depth, sortAsc).reverse();
     const bidRows = this.topLevels(this.bids, this.depth, sortDesc);
 
     const fmtPx = (n: number): string => n.toFixed(this.estimateDecimals());
     const fmtQty = (n: number): string => n.toLocaleString(undefined, { maximumFractionDigits: 3 });
 
-    let askTotal = 0;
-    const asksHtml = askRows.map((l) => {
-      askTotal += l.qty;
-      return `<div class="row ask"><span class="qty">${fmtQty(l.qty)}</span><span class="px">${fmtPx(l.price)}</span><span class="total">${fmtQty(askTotal)}</span></div>`;
+    // 1. Calculate cumulative totals and maximum total for relative background depth bars
+    let maxTotal = 0.0001;
+    let runningAskTotal = 0;
+    const askLevelsCalculated = askRows.map((l) => {
+      runningAskTotal += l.qty;
+      return { ...l, cumulativeTotal: runningAskTotal };
+    });
+    if (runningAskTotal > maxTotal) maxTotal = runningAskTotal;
+
+    let runningBidTotal = 0;
+    const bidLevelsCalculated = bidRows.map((l) => {
+      runningBidTotal += l.qty;
+      return { ...l, cumulativeTotal: runningBidTotal };
+    });
+    if (runningBidTotal > maxTotal) maxTotal = runningBidTotal;
+
+    // 2. Generate HTML with background depth bars and flashing size updates
+    const nextSizes = new Map<number, number>();
+
+    const asksHtml = askLevelsCalculated.map((l) => {
+      nextSizes.set(l.price, l.qty);
+      const prevQty = this.prevSizes.get(l.price);
+      let flashClass = '';
+      if (prevQty !== undefined && prevQty !== l.qty) {
+        flashClass = l.qty > prevQty ? ' flash-up' : ' flash-down';
+      }
+      // Calculate depth percentage relative to the maximum cumulative volume
+      const pct = ((l.cumulativeTotal / maxTotal) * 100).toFixed(1);
+      return `<div class="row ask" style="--depth-pct: ${pct}%"><span class="qty${flashClass}">${fmtQty(l.qty)}</span><span class="px">${fmtPx(l.price)}</span><span class="total">${fmtQty(l.cumulativeTotal)}</span></div>`;
     }).join('');
 
-    let bidTotal = 0;
-    const bidsHtml = bidRows.map((l) => {
-      bidTotal += l.qty;
-      return `<div class="row bid"><span class="qty">${fmtQty(l.qty)}</span><span class="px">${fmtPx(l.price)}</span><span class="total">${fmtQty(bidTotal)}</span></div>`;
+    const bidsHtml = bidLevelsCalculated.map((l) => {
+      nextSizes.set(l.price, l.qty);
+      const prevQty = this.prevSizes.get(l.price);
+      let flashClass = '';
+      if (prevQty !== undefined && prevQty !== l.qty) {
+        flashClass = l.qty > prevQty ? ' flash-up' : ' flash-down';
+      }
+      const pct = ((l.cumulativeTotal / maxTotal) * 100).toFixed(1);
+      return `<div class="row bid" style="--depth-pct: ${pct}%"><span class="qty${flashClass}">${fmtQty(l.qty)}</span><span class="px">${fmtPx(l.price)}</span><span class="total">${fmtQty(l.cumulativeTotal)}</span></div>`;
     }).join('');
 
+    this.prevSizes = nextSizes;
+
+    // 3. Render mid price and spread divider
     const bestBid = bidRows[0]?.price;
     const bestAsk = askRows[askRows.length - 1]?.price;
     if (bestBid !== undefined && bestAsk !== undefined && bestAsk >= bestBid) {
       const spread = bestAsk - bestBid;
       const mid = (bestAsk + bestBid) / 2;
-      this.spreadEl.textContent = `${fmtPx(spread)} (${((spread / mid) * 10_000).toFixed(2)} bps)`;
+      const bps = (spread / mid) * 10_000;
+      
+      this.spreadEl.textContent = `${fmtPx(spread)} (${bps.toFixed(2)} bps)`;
+      
+      this.root.innerHTML = `
+        ${asksHtml}
+        <div class="spread">
+          <span class="mid-title">Mid Price</span>
+          <span class="mid-val">${fmtPx(mid)}</span>
+          <span class="spread-val">${fmtPx(spread)} (${bps.toFixed(1)} bps)</span>
+        </div>
+        ${bidsHtml}
+      `;
     } else {
       this.spreadEl.textContent = '';
+      this.root.innerHTML = `
+        ${asksHtml}
+        <div class="spread">
+          <span class="mid-title">Spread</span>
+          <span class="mid-val">—</span>
+        </div>
+        ${bidsHtml}
+      `;
     }
-
-    this.root.innerHTML = `${asksHtml}<div class="spread">— mid ${bestAsk !== undefined && bestBid !== undefined ? fmtPx((bestAsk + bestBid) / 2) : '—'} —</div>${bidsHtml}`;
   }
 
   private estimateDecimals(): number {
@@ -104,3 +167,4 @@ export class OrderBookPanel {
     return 6;
   }
 }
+

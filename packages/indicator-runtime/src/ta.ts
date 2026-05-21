@@ -4,20 +4,18 @@
 // (EmaState / RsiState / etc.) survives between bars. The interpreter passes the
 // AST node + the current Series argument; this module owns the keyed cache.
 
+import { Series as OakSeries, BarData as OakBarData, ta as oakTa } from 'oakscriptjs';
 import { RuntimeError, ValidationError } from './errors.js';
 import { Series, DEFAULT_SERIES_CAPACITY } from './series.js';
 import type { ExecutionContext } from './context.js';
 import type { Expr, KwArg } from './nodes.js';
 import {
   EmaState,
-  RsiState,
   SmaState,
   AtrState,
   RollingExtreme,
   StdevState,
   SumState,
-  WmaState,
-  VwmaState,
   TrendState,
   MacdState,
 } from './ta-core.js';
@@ -122,6 +120,25 @@ export type BuiltinHandler = (
   evaluator: (e: Expr) => unknown,
 ) => unknown;
 
+function getOakState<T>(ctx: ExecutionContext, node: object, factory: (bd: OakBarData) => T): { bd: OakBarData, res: T } {
+  return getCallState(ctx, node, () => {
+    const bd = new OakBarData();
+    return { bd, res: factory(bd) };
+  });
+}
+
+function pushOakBar(ctx: ExecutionContext, bd: OakBarData) {
+  const time = (ctx.times && ctx.times[ctx.barIndex]) ?? ctx.barIndex;
+  bd.push({
+    time: Number(time),
+    open: ctx.builtins.open.get(0),
+    high: ctx.builtins.high.get(0),
+    low: ctx.builtins.low.get(0),
+    close: ctx.builtins.close.get(0),
+    volume: ctx.builtins.volume.get(0),
+  });
+}
+
 export const BUILTINS: Record<string, BuiltinHandler> = {
   sma(ctx, node, args) {
     const src = asSeries(args[0], 'src');
@@ -148,15 +165,59 @@ export const BUILTINS: Record<string, BuiltinHandler> = {
   },
 
   rsi(ctx, node, args) {
-    const src = asSeries(args[0], 'src');
     const len = asPeriod(args[1], 'len');
-    const state = getCallState(ctx, node, () => new RsiState(len));
-    if (state.period !== len) {
-      throw new ValidationError(
-        `rsi(): 'len' must be constant per call site (was ${state.period}, got ${len})`,
-      );
-    }
-    return state.update(src.get(0));
+    const state = getOakState(ctx, node, (bd) => oakTa.rsi(OakSeries.fromBars(bd, 'close'), len));
+    pushOakBar(ctx, state.bd);
+    return state.res.last();
+  },
+
+  wma(ctx, node, args) {
+    const len = asPeriod(args[1], 'len');
+    const state = getOakState(ctx, node, (bd) => oakTa.wma(OakSeries.fromBars(bd, 'close'), len));
+    pushOakBar(ctx, state.bd);
+    return state.res.last();
+  },
+
+  vwma(ctx, node, args) {
+    const len = asPeriod(args[1], 'len');
+    const state = getOakState(ctx, node, (bd) => oakTa.vwma(OakSeries.fromBars(bd, 'close'), len, OakSeries.fromBars(bd, 'volume')));
+    pushOakBar(ctx, state.bd);
+    return state.res.last();
+  },
+
+  hma(ctx, node, args) {
+    const len = asPeriod(args[1], 'len');
+    const state = getOakState(ctx, node, (bd) => oakTa.hma(OakSeries.fromBars(bd, 'close'), len));
+    pushOakBar(ctx, state.bd);
+    return state.res.last();
+  },
+
+  cci(ctx, node, args) {
+    const len = asPeriod(args[1], 'len');
+    const state = getOakState(ctx, node, (bd) => oakTa.cci(OakSeries.fromBars(bd, 'close'), len));
+    pushOakBar(ctx, state.bd);
+    return state.res.last();
+  },
+
+  stoch(ctx, node, args) {
+    const len = asPeriod(args[3], 'len');
+    const state = getOakState(ctx, node, (bd) => oakTa.stoch(OakSeries.fromBars(bd, 'close'), OakSeries.fromBars(bd, 'high'), OakSeries.fromBars(bd, 'low'), len));
+    pushOakBar(ctx, state.bd);
+    return state.res.last();
+  },
+
+  mom(ctx, node, args) {
+    const len = asPeriod(args[1], 'len');
+    const state = getOakState(ctx, node, (bd) => oakTa.mom(OakSeries.fromBars(bd, 'close'), len));
+    pushOakBar(ctx, state.bd);
+    return state.res.last();
+  },
+
+  roc(ctx, node, args) {
+    const len = asPeriod(args[1], 'len');
+    const state = getOakState(ctx, node, (bd) => oakTa.roc(OakSeries.fromBars(bd, 'close'), len));
+    pushOakBar(ctx, state.bd);
+    return state.res.last();
   },
 
   atr(ctx, node, args) {
@@ -219,30 +280,6 @@ export const BUILTINS: Record<string, BuiltinHandler> = {
       );
     }
     return state.update(src.get(0));
-  },
-
-  wma(ctx, node, args) {
-    const src = asSeries(args[0], 'src');
-    const len = asPeriod(args[1], 'len');
-    const state = getCallState(ctx, node, () => new WmaState(len));
-    if (state.period !== len) {
-      throw new ValidationError(
-        `wma(): 'len' must be constant per call site (was ${state.period}, got ${len})`,
-      );
-    }
-    return state.update(src.get(0));
-  },
-
-  vwma(ctx, node, args) {
-    const src = asSeries(args[0], 'src');
-    const len = asPeriod(args[1], 'len');
-    const state = getCallState(ctx, node, () => new VwmaState(len));
-    if (state.period !== len) {
-      throw new ValidationError(
-        `vwma(): 'len' must be constant per call site (was ${state.period}, got ${len})`,
-      );
-    }
-    return state.update(src.get(0), ctx.builtins.volume.get(0));
   },
 
   falling(ctx, node, args) {
@@ -373,20 +410,6 @@ export const BUILTINS: Record<string, BuiltinHandler> = {
   },
   map_size(_ctx, _node, args) {
     return asMap(args[0], 'map').items.size;
-  },
-
-  mom(_ctx, _node, args) {
-    const src = asSeries(args[0], 'src');
-    const len = asPeriod(args[1], 'len');
-    return src.get(0) - src.get(len);
-  },
-
-  roc(_ctx, _node, args) {
-    const src = asSeries(args[0], 'src');
-    const len = asPeriod(args[1], 'len');
-    const prev = src.get(len);
-    if (!Number.isFinite(prev) || prev === 0) return NaN;
-    return ((src.get(0) - prev) / prev) * 100;
   },
 
   bbmiddle(ctx, node, args) {

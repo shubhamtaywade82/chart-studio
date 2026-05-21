@@ -1,16 +1,15 @@
 /**
- * klinecharts built-in indicator catalog (subset). The library ships
- * 30+ — we surface the most common ones here. Each entry tells the
- * picker whether it overlays on the candle pane (e.g. MA, BOLL) or
- * creates a sub-pane (VOL, RSI, MACD).
+ * Indicator catalog surfacing common technical indicators.
+ * Each entry tells the picker whether it overlays on the candle pane (e.g. MA, BOLL)
+ * or creates a sub-pane (VOL, RSI, MACD).
  */
 
 export interface IndicatorDef {
-  id: string;        // klinecharts indicator name
+  id: string;        // Unique identifier for the indicator
   label: string;
   /** Show on main candle pane vs separate sub-pane. */
   onMain: boolean;
-  /** Default calcParams (klinecharts uses tuple-style params). */
+  /** Default calcParams. */
   defaults: number[];
   /** Human description of each calc param slot. */
   paramLabels: string[];
@@ -18,31 +17,30 @@ export interface IndicatorDef {
 
 export const INDICATORS: IndicatorDef[] = [
   // Overlays
-  { id: 'MA',   label: 'Moving Average',         onMain: true,  defaults: [5, 10, 30, 60], paramLabels: ['fast', 'mid', 'slow', 'long'] },
-  { id: 'EMA',  label: 'Exponential MA',         onMain: true,  defaults: [9, 21, 50, 200], paramLabels: ['ema1', 'ema2', 'ema3', 'ema4'] },
+  { id: 'MA',   label: 'Moving Average',         onMain: true,  defaults: [20], paramLabels: ['period'] },
+  { id: 'EMA',  label: 'Exponential MA',         onMain: true,  defaults: [9],  paramLabels: ['period'] },
   { id: 'SMA',  label: 'Smoothed MA',            onMain: true,  defaults: [12, 2], paramLabels: ['period', 'weight'] },
   { id: 'BOLL', label: 'Bollinger Bands',        onMain: true,  defaults: [20, 2], paramLabels: ['period', 'mult'] },
-  { id: 'BBI',  label: 'Bull-Bear Index',        onMain: true,  defaults: [3, 6, 12, 24], paramLabels: ['p1', 'p2', 'p3', 'p4'] },
-  { id: 'SAR',  label: 'Parabolic SAR',          onMain: true,  defaults: [2, 2, 20], paramLabels: ['start', 'step', 'max'] },
-  { id: 'SMC',  label: 'Smart Money Concepts',   onMain: true,  defaults: [5], paramLabels: ['period'] },
+  { id: 'SAR',  label: 'Parabolic SAR',          onMain: true,  defaults: [0.02, 0.02, 0.2], paramLabels: ['start', 'step', 'max'] },
+  { id: 'VWAP', label: 'VWAP',                   onMain: true,  defaults: [], paramLabels: [] },
+  { id: 'SUPERTREND', label: 'SuperTrend',       onMain: true,  defaults: [10, 3], paramLabels: ['atrPeriod', 'multiplier'] },
+  { id: 'ICHIMOKU', label: 'Ichimoku Cloud',      onMain: true,  defaults: [9, 26, 52, 26], paramLabels: ['tenkan', 'kijun', 'senkouB', 'displacement'] },
+  
   // Sub-panes
+  { id: 'VOL',  label: 'Volume',                 onMain: false, defaults: [20], paramLabels: ['ma'] },
+  { id: 'MACD', label: 'MACD',                   onMain: false, defaults: [12, 26, 9], paramLabels: ['fast', 'slow', 'signal'] },
+  { id: 'RSI',  label: 'RSI',                    onMain: false, defaults: [14], paramLabels: ['period'] },
+  { id: 'ATR',  label: 'Average True Range',     onMain: false, defaults: [14], paramLabels: ['period'] },
+  { id: 'ADX',  label: 'ADX',                    onMain: false, defaults: [14], paramLabels: ['period'] },
+  { id: 'STOCH', label: 'Stochastic',            onMain: false, defaults: [14, 3, 3], paramLabels: ['kPeriod', 'kSmoothing', 'dSmoothing'] },
+  { id: 'CCI',  label: 'CCI',                    onMain: false, defaults: [20], paramLabels: ['period'] },
+  { id: 'OBV',  label: 'On-Balance Volume',      onMain: false, defaults: [], paramLabels: [] },
+  { id: 'MFI',  label: 'Money Flow Index',       onMain: false, defaults: [14], paramLabels: ['period'] },
+  
+  // Custom Analytics (built-in to chart-studio)
   { id: 'CVD',  label: 'Cumulative Volume Delta', onMain: false, defaults: [], paramLabels: [] },
   { id: 'OI',   label: 'Open Interest Change',    onMain: false, defaults: [], paramLabels: [] },
-  { id: 'VOL',  label: 'Volume',                 onMain: false, defaults: [5, 10, 20], paramLabels: ['ma1', 'ma2', 'ma3'] },
-  { id: 'MACD', label: 'MACD',                   onMain: false, defaults: [12, 26, 9], paramLabels: ['fast', 'slow', 'signal'] },
-  { id: 'KDJ',  label: 'KDJ Stochastic',         onMain: false, defaults: [9, 3, 3], paramLabels: ['period', 'k', 'd'] },
-  { id: 'RSI',  label: 'RSI',                    onMain: false, defaults: [6, 12, 24], paramLabels: ['rsi1', 'rsi2', 'rsi3'] },
-  { id: 'CCI',  label: 'CCI',                    onMain: false, defaults: [13], paramLabels: ['period'] },
-  { id: 'OBV',  label: 'On-Balance Volume',      onMain: false, defaults: [30], paramLabels: ['ma'] },
-  { id: 'DMI',  label: 'Directional Movement',   onMain: false, defaults: [14, 6], paramLabels: ['period', 'ma'] },
-  { id: 'ATR',  label: 'Average True Range',     onMain: false, defaults: [14], paramLabels: ['period'] },
-  { id: 'WR',   label: 'Williams %R',            onMain: false, defaults: [6, 10, 14], paramLabels: ['wr1', 'wr2', 'wr3'] },
-  { id: 'PSY',  label: 'Psychological Line',     onMain: false, defaults: [12, 6], paramLabels: ['period', 'ma'] },
-  { id: 'TRIX', label: 'TRIX',                   onMain: false, defaults: [12, 20], paramLabels: ['period', 'ma'] },
-  { id: 'ROC',  label: 'Rate of Change',         onMain: false, defaults: [12, 6], paramLabels: ['period', 'ma'] },
-  { id: 'MTM',  label: 'Momentum',               onMain: false, defaults: [6, 10], paramLabels: ['period', 'ma'] },
-  { id: 'EMV',  label: 'Ease of Movement',       onMain: false, defaults: [14, 9], paramLabels: ['period', 'ma'] },
-  { id: 'VR',   label: 'Volume Ratio',           onMain: false, defaults: [24, 30], paramLabels: ['period', 'ma'] },
+  { id: 'SMC',  label: 'Smart Money Concepts',   onMain: true,  defaults: [5], paramLabels: ['period'] },
 ];
 
 export interface ActiveIndicator {
