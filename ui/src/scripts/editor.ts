@@ -56,20 +56,23 @@ export class ScriptManager {
             name: s.name,
             shortName: s.name,
             figures: outputs
-              .filter(out => out.kind !== 'marker')
-              .map(out => ({
-                key: out.id,
-                title: out.name,
-                type: out.kind === 'histogram' ? 'bar' : 'line',
-                color: (out.opts['color'] as string) ?? '#58a6ff'
-              })),
+              .filter(out => out.kind === 'line' || out.kind === 'histogram' || out.kind === 'area')
+              .map(out => {
+                const o = out as Extract<typeof out, { kind: 'line' | 'histogram' | 'area' }>;
+                return {
+                  key: o.name,
+                  title: o.name,
+                  type: o.kind === 'histogram' ? 'bar' : 'line',
+                  color: (o.opts['color'] as string) ?? '#58a6ff'
+                };
+              }),
             calc: (dataList) => {
               return dataList.map((_, index) => {
                 const row: Record<string, any> = {};
                 for (const out of outputs) {
-                  if (out.kind === 'marker') continue;
+                  if (out.kind !== 'line' && out.kind !== 'histogram' && out.kind !== 'area') continue;
                   const val = out.data[index];
-                  row[out.id] = val && Number.isFinite(val.value) ? val.value : null;
+                  row[out.name] = val && Number.isFinite(val.value) ? val.value : null;
                 }
                 return row;
               });

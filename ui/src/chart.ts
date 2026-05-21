@@ -14,6 +14,7 @@ import {
   type UTCTimestamp,
   type MouseEventParams,
   type LogicalRange,
+  createSeriesMarkers,
 } from 'lightweight-charts';
 import type { Candle } from './provider-client';
 import { CANDLE_THEMES, loadCandleTheme, saveCandleTheme, type CandleTheme } from './chart/candle-themes';
@@ -56,6 +57,7 @@ export class ChartView {
   private theme: CandleTheme = loadCandleTheme();
   private precision: number = 2;
   private resizeObs: ResizeObserver;
+  private markersPlugin?: any;
   private crosshairListeners = new Set<(c: CrosshairInfo | null) => void>();
   private liveListeners = new Set<(atLive: boolean) => void>();
   private atLive = true;
@@ -705,13 +707,13 @@ export class ChartView {
             priceLineVisible: false,
             title: `MA(${period})`,
           });
-          s.setData(res.plots.plot0);
+          s.setData(res.plots.plot0 ?? []);
           added.push(s);
           break;
         }
         case 'EMA': {
           const [period = 9] = ind.params;
-          const res = EMA.calculate(bars, { len: period });
+          const res = EMA.calculate(bars, { length: period });
           const s = this._api.addSeries(LineSeries, {
             color: EMA_COLORS[0]!,
             lineWidth: 1,
@@ -719,13 +721,13 @@ export class ChartView {
             priceLineVisible: false,
             title: `EMA(${period})`,
           });
-          s.setData(res.plots.plot0);
+          s.setData(res.plots.plot0 ?? []);
           added.push(s);
           break;
         }
         case 'BOLL': {
           const [period = 20, mult = 2] = ind.params;
-          const res = BollingerBands.calculate(bars, { len: period, mult });
+          const res = BollingerBands.calculate(bars, { length: period, mult });
           const midS = this._api.addSeries(LineSeries, {
             color: '#ff9800', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, title: `BB(${period})`,
           });
@@ -735,9 +737,9 @@ export class ChartView {
           const loS = this._api.addSeries(LineSeries, {
             color: 'rgba(255, 152, 0, 0.5)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false,
           });
-          midS.setData(res.plots.plot0);
-          upS.setData(res.plots.plot1);
-          loS.setData(res.plots.plot2);
+          midS.setData(res.plots.plot0 ?? []);
+          upS.setData(res.plots.plot1 ?? []);
+          loS.setData(res.plots.plot2 ?? []);
           added.push(midS, upS, loS);
           break;
         }
@@ -755,7 +757,7 @@ export class ChartView {
           const s = this._api.addSeries(LineSeries, {
             color: '#7b1fa2', lineWidth: 1, lastValueVisible: true, priceLineVisible: false, title: `RSI(${period})`,
           }, pane);
-          s.setData(res.plots.plot0);
+          s.setData(res.plots.plot0 ?? []);
           s.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0.1 } });
           added.push(s);
           break;
@@ -774,9 +776,9 @@ export class ChartView {
             color: '#4caf50', lastValueVisible: false, priceLineVisible: false,
           }, pane);
           
-          macdLine.setData(res.plots.plot0);
-          signalLine.setData(res.plots.plot1);
-          hist.setData(res.plots.plot2.map(p => ({
+          macdLine.setData(res.plots.plot0 ?? []);
+          signalLine.setData(res.plots.plot1 ?? []);
+          hist.setData((res.plots.plot2 ?? []).map(p => ({
             ...p,
             color: (p.value ?? 0) >= 0 ? '#4caf50aa' : '#ff5252aa'
           })));
@@ -791,7 +793,7 @@ export class ChartView {
           const s = this._api.addSeries(LineSeries, {
             color: '#607d8b', lineWidth: 1, lastValueVisible: true, priceLineVisible: false, title: `ATR(${period})`,
           }, pane);
-          s.setData(res.plots.plot0);
+          s.setData(res.plots.plot0 ?? []);
           added.push(s);
           break;
         }
@@ -802,9 +804,9 @@ export class ChartView {
           const adx = this._api.addSeries(LineSeries, { color: '#ffeb3b', title: 'ADX' }, pane);
           const plusDI = this._api.addSeries(LineSeries, { color: '#4caf50', title: '+DI' }, pane);
           const minusDI = this._api.addSeries(LineSeries, { color: '#ff5252', title: '-DI' }, pane);
-          adx.setData(res.plots.plot0);
-          plusDI.setData(res.plots.plot1);
-          minusDI.setData(res.plots.plot2);
+          adx.setData(res.plots.plot0 ?? []);
+          plusDI.setData(res.plots.plot1 ?? []);
+          minusDI.setData(res.plots.plot2 ?? []);
           added.push(adx, plusDI, minusDI);
           break;
         }
@@ -817,9 +819,11 @@ export class ChartView {
             priceLineVisible: false,
             title: 'SuperTrend',
           });
-          s.setData(res.plots.plot0.map((p, i) => ({
+          const plot0 = res.plots.plot0 ?? [];
+          const plot1 = res.plots.plot1 ?? [];
+          s.setData(plot0.map((p, i) => ({
             ...p,
-            color: (res.plots.plot1[i]?.value ?? 0) === 1 ? '#4caf50' : '#ff5252'
+            color: (plot1[i]?.value ?? 0) === 1 ? '#4caf50' : '#ff5252'
           })));
           added.push(s);
           break;
@@ -831,21 +835,21 @@ export class ChartView {
           const kijun = this._api.addSeries(LineSeries, { color: '#f44336', title: 'Kijun' });
           const spanA = this._api.addSeries(LineSeries, { color: '#4caf50', title: 'Span A' });
           const spanBSeries = this._api.addSeries(LineSeries, { color: '#ff9800', title: 'Span B' });
-          tenkan.setData(res.plots.plot0);
-          kijun.setData(res.plots.plot1);
-          spanA.setData(res.plots.plot2);
-          spanBSeries.setData(res.plots.plot3);
+          tenkan.setData(res.plots.plot0 ?? []);
+          kijun.setData(res.plots.plot1 ?? []);
+          spanA.setData(res.plots.plot2 ?? []);
+          spanBSeries.setData(res.plots.plot3 ?? []);
           added.push(tenkan, kijun, spanA, spanBSeries);
           break;
         }
         case 'STOCH': {
           const pane = nextSubPane++;
           const [k = 14, kSmooth = 3, dSmooth = 3] = ind.params;
-          const res = Stochastic.calculate(bars, { length: k, k: kSmooth, d: dSmooth });
+          const res = Stochastic.calculate(bars, { periodK: k, smoothK: kSmooth, periodD: dSmooth });
           const kLine = this._api.addSeries(LineSeries, { color: '#2196f3', title: '%K' }, pane);
           const dLine = this._api.addSeries(LineSeries, { color: '#ff9800', title: '%D' }, pane);
-          kLine.setData(res.plots.plot0);
-          dLine.setData(res.plots.plot1);
+          kLine.setData(res.plots.plot0 ?? []);
+          dLine.setData(res.plots.plot1 ?? []);
           added.push(kLine, dLine);
           break;
         }
@@ -854,7 +858,7 @@ export class ChartView {
           const [period = 20] = ind.params;
           const res = CCI.calculate(bars, { length: period });
           const s = this._api.addSeries(LineSeries, { color: '#9c27b0', title: `CCI(${period})` }, pane);
-          s.setData(res.plots.plot0);
+          s.setData(res.plots.plot0 ?? []);
           added.push(s);
           break;
         }
@@ -862,7 +866,7 @@ export class ChartView {
           const pane = nextSubPane++;
           const res = OBV.calculate(bars, {});
           const s = this._api.addSeries(LineSeries, { color: '#4caf50', title: 'OBV' }, pane);
-          s.setData(res.plots.plot0);
+          s.setData(res.plots.plot0 ?? []);
           added.push(s);
           break;
         }
@@ -871,7 +875,7 @@ export class ChartView {
           const [period = 14] = ind.params;
           const res = MFI.calculate(bars, { length: period });
           const s = this._api.addSeries(LineSeries, { color: '#00bcd4', title: `MFI(${period})` }, pane);
-          s.setData(res.plots.plot0);
+          s.setData(res.plots.plot0 ?? []);
           added.push(s);
           break;
         }
@@ -990,7 +994,13 @@ export class ChartView {
 
     if (markers.length > 0) {
       markers.sort((a, b) => a.time - b.time);
-      this.series.setMarkers(markers);
+      if (!this.markersPlugin) {
+        this.markersPlugin = createSeriesMarkers(this.series, markers);
+      } else {
+        this.markersPlugin.setMarkers(markers);
+      }
+    } else if (this.markersPlugin) {
+      this.markersPlugin.setMarkers([]);
     }
   }
 
