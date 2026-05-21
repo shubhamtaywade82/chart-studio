@@ -28,6 +28,7 @@ export class AnalyticsRenderer {
   private cvdSeries: ISeriesApi<'Histogram'> | null = null;
   private oiSeries: ISeriesApi<'Histogram'> | null = null;
   private dayLevelLines: Map<string, ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']>> = new Map();
+  private optionLevelLines: Map<string, ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']>> = new Map();
   private cumulativeDelta = 0;
   /** Last seen cumulative day totals. Used to compute per-tick deltas. */
   private lastBuyQty = 0;
@@ -51,7 +52,57 @@ export class AnalyticsRenderer {
       try { this.mainSeries.removePriceLine(line); } catch { /* noop */ }
     }
     this.dayLevelLines.clear();
+    for (const line of this.optionLevelLines.values()) {
+      try { this.mainSeries.removePriceLine(line); } catch { /* noop */ }
+    }
+    this.optionLevelLines.clear();
     this.dayLevelLastPrice?.clear();
+  }
+
+  updateOptionChain(data: any): void {
+    const { maxPain, supportOI, resistanceOI } = data;
+
+    // Clear old option lines
+    for (const line of this.optionLevelLines.values()) {
+      try { this.mainSeries.removePriceLine(line); } catch { /* noop */ }
+    }
+    this.optionLevelLines.clear();
+
+    if (maxPain > 0) {
+      const mpLine = this.mainSeries.createPriceLine({
+        price: maxPain,
+        color: '#7c4dff',
+        lineWidth: 2,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: 'Max Pain',
+      });
+      this.optionLevelLines.set('max-pain', mpLine);
+    }
+
+    if (supportOI > 0) {
+      const sLine = this.mainSeries.createPriceLine({
+        price: supportOI,
+        color: '#00e676',
+        lineWidth: 1,
+        lineStyle: LineStyle.Dotted,
+        axisLabelVisible: true,
+        title: 'OI Support',
+      });
+      this.optionLevelLines.set('oi-support', sLine);
+    }
+
+    if (resistanceOI > 0) {
+      const rLine = this.mainSeries.createPriceLine({
+        price: resistanceOI,
+        color: '#ff1744',
+        lineWidth: 1,
+        lineStyle: LineStyle.Dotted,
+        axisLabelVisible: true,
+        title: 'OI Resistance',
+      });
+      this.optionLevelLines.set('oi-resistance', rLine);
+    }
   }
 
   setupAtpSeries(): void {

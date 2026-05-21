@@ -16,6 +16,7 @@ import { INDICATORS, type ActiveIndicator } from './indicators/registry';
 import { AIBriefPanel } from './panels/ai-brief';
 import { StrategySignalsPanel } from './panels/strategy-signals';
 import { SmartSignalsPanel } from './panels/smart-signals';
+import { OptionChainPanel } from './panels/option-chain';
 
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
@@ -78,8 +79,10 @@ const main = (): void => {
   const aiBrief = new AIBriefPanel();
   const strategySignals = new StrategySignalsPanel(client);
   const smartSignals = new SmartSignalsPanel();
+  const optionChain = new OptionChainPanel(document.getElementById('option-chain-panel')!);
 
   let activeState: AppState | null = parseHash();
+
   let currentCandles: Candle[] = [];
   const unsubs: Array<() => void> = [];
   // Trade-tape running counters (mirror sentiment buy/sell windowed counts roughly).
@@ -328,6 +331,7 @@ const main = (): void => {
     ob.reset({ lastUpdateId: 0, bids: [], asks: [], ts: 0 });
     tape.reset();
     sentiment.reset();
+    optionChain.update(null as any);
     tapeBuys = 0; tapeSells = 0;
     if (tapeBuysEl) tapeBuysEl.textContent = '0';
     if (tapeSellsEl) tapeSellsEl.textContent = '0';
@@ -405,7 +409,11 @@ const main = (): void => {
       chart.renderVolumeProfile();
       // Analytics stream often carries the latest LTP as well; use as fallback.
       updateHeaderPrice(data.ltp);
-    }));
+      if (data.optionChain) {
+        optionChain.update(data.optionChain);
+      }
+      }));
+
     unsubs.push(client.streamAISignals(state.provider, state.symbol, (sig) => {
       chart.applyAISignal(sig);
     }));

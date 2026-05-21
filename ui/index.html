@@ -123,6 +123,7 @@
         <nav class="sidebar-tab-bar" role="tablist" aria-label="Sidebar views">
           <button type="button" class="sidebar-tab active" role="tab" aria-selected="true" data-tab="live">Live</button>
           <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="tape">Tape</button>
+          <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="options">Options</button>
           <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="insights">Insights</button>
           <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="alerts">Alerts</button>
           <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="scripts">Scripts</button>
@@ -189,6 +190,17 @@
                 </div>
                 <div id="trade-tape" class="trade-tape"></div>
               </div>
+            </div>
+          </div>
+
+          <!-- Options: Strike Ladder -->
+          <div class="sidebar-tab-pane" role="tabpanel" data-tab-pane="options" aria-hidden="true">
+            <div class="panel sidebar-inner-panel">
+              <div class="panel-header">
+                <h2 class="panel-title">NSE Option Chain</h2>
+                <span class="mono-sm dim">Live Greeks</span>
+              </div>
+              <div id="option-chain-panel" class="option-chain-panel"></div>
             </div>
           </div>
 

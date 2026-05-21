@@ -556,10 +556,15 @@ export class ChartView {
     depthBids: Array<{ price: number; qty: number; orders: number }> | undefined;
     depthAsks: Array<{ price: number; qty: number; orders: number }> | undefined;
     prevClose: number | undefined; prevOi: number | undefined;
+    optionChain?: any;
   }): void {
     if (!this.analytics) return;
     const last = this.candles[this.candles.length - 1];
     if (!last) return;
+    
+    if (data.optionChain) {
+      this.analytics.updateOptionChain(data.optionChain);
+    }
 
     // Lazily anchor dayOpenMs to the FIRST tick that carries a valid dayOpen,
     // so expectedVolume extrapolates over real session time, not candle age.

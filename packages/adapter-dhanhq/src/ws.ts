@@ -247,6 +247,7 @@ const parseTick = (buf: Buffer): DhanTick | null => {
 export class DhanStreamPool {
   private ws: WebSocket | null = null;
   private readonly subs = new Map<string, InternalSub>(); // key = `${seg}:${secId}`
+  private readonly lastTicks = new Map<string, DhanTick>(); // key = `${seg}:${secId}`
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private closed = false;
@@ -275,6 +276,11 @@ export class DhanStreamPool {
         this.ensureConnected();
       }
     });
+  }
+
+  getLastTick(symbol: string): DhanTick | undefined {
+    // Symbol is usually segment:secId (e.g. NSE_EQ:11536)
+    return this.lastTicks.get(symbol);
   }
 
   subscribe(ins: DhanSubscription, fn: Handler): () => void {
@@ -445,6 +451,15 @@ export class DhanStreamPool {
         return;
       }
       const key = `${segStr}:${tick.securityId}`;
+      
+      // Update cache
+      const existing = this.lastTicks.get(key);
+      if (existing) {
+        Object.assign(existing, tick);
+      } else {
+        this.lastTicks.set(key, { ...tick });
+      }
+
       const entry = this.subs.get(key);
       if (entry) {
         for (const fn of entry.fns) fn(tick);

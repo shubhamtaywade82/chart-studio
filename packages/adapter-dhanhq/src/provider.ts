@@ -21,6 +21,7 @@ import {
   type DhanInstrument,
 } from './instruments';
 import { createClient, fetchCandles, fetchMarketDepth } from './rest';
+import { fetchOptionChain, calculateMaxPain, GreeksEngine } from './option-chain';
 import { DhanStreamPool, type DhanTick } from './ws';
 import type { TokenProvider } from './token-provider';
 
@@ -101,13 +102,58 @@ export class DhanProvider implements MarketDataProvider {
     return fetchCandles(this.client, ins, interval, opts);
   }
 
-  async getOrderBook(symbol: string): Promise<OrderBookSnapshot | null> {
+  async getOrderBook(symbol: string, limit?: number): Promise<OrderBookSnapshot | null> {
     const ins = await findInstrumentAsync(symbol, this.cfg.scripMasterUrl);
     if (!ins) return null;
     return fetchMarketDepth(this.client, ins);
   }
 
+  async getOptionChain(symbol: string): Promise<any> {
+    const ins = await findInstrumentAsync(symbol, this.cfg.scripMasterUrl);
+    if (!ins) return null;
+
+    // Greeks need the underlying price (S). We'll try to get it from the pool's last tick.
+    const underlyingTick = this.pool.getLastTick(symbol);
+    const S = underlyingTick?.ltp || 0;
+
+    const items = await fetchOptionChain(this.client, ins);
+    const maxPain = calculateMaxPain(items);
+
+    // Greeks calculation: we need DTE (T) and risk-free rate.
+    // Assuming RBI repo 6.5%.
+    const greeks = new GreeksEngine();
+
+    // Calculate S/R based on highest OI
+    let supportOI = 0;
+    let resistanceOI = 0;
+    let highPutOI = 0;
+    let highCallOI = 0;
+
+    for (const item of items) {
+      if (item.putOI > highPutOI) {
+        highPutOI = item.putOI;
+        supportOI = item.strikePrice;
+      }
+      if (item.callOI > highCallOI) {
+        highCallOI = item.callOI;
+        resistanceOI = item.strikePrice;
+      }
+    }
+
+    return {
+      underlying: symbol,
+      timestamp: Date.now(),
+      strikes: items,
+      maxPain,
+      supportOI,
+      resistanceOI,
+      spotPrice: S
+    };
+  }
+
+
   // ── Streams ──────────────────────────────────────────────────────────
+
 
   /**
    * Resolves the instrument synchronously when possible, async otherwise.
@@ -276,50 +322,70 @@ export class DhanProvider implements MarketDataProvider {
     onData: (data: AnalyticsPayload) => void,
   ): Unsub {
     const state = { dayOpen: 0, dayHigh: 0, dayLow: 0, dayClose: 0, prevClose: 0, prevOi: 0 };
-    return this.deferredSubscribe(symbol, (ins) => this.pool.subscribe(
-      { exchangeSegment: ins.exchangeSegment, securityId: ins.securityId },
-      (tick: DhanTick) => {
-        if (typeof tick.ltp !== 'number') return;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-        // Update day OHLC from packets that carry them (Quote=4 / Full=8).
-        // Note: code 6 (PrevClose) does NOT set tick.close anymore — it sets
-        // tick.prevClose, so dayClose stays stable across packet types.
-        if (typeof tick.open === 'number') state.dayOpen = tick.open;
-        if (typeof tick.high === 'number') state.dayHigh = tick.high;
-        if (typeof tick.low === 'number') state.dayLow = tick.low;
-        if (typeof tick.close === 'number') state.dayClose = tick.close;
-        if (typeof tick.prevClose === 'number') state.prevClose = tick.prevClose;
-        if (typeof tick.prevOi === 'number') state.prevOi = tick.prevOi;
+    const unsub = this.deferredSubscribe(symbol, (ins) => {
+      // Start option chain polling if it's an FNO instrument
+      if (ins.exchangeSegment === 'NSE_FNO') {
+        const poll = async () => {
+          try {
+            const chain = await this.getOptionChain(symbol);
+            if (chain) onData({ optionChain: chain } as any);
+          } catch (err) {
+            console.warn(`[dhanhq] option chain poll error for ${symbol}`, err);
+          }
+        };
+        void poll();
+        pollTimer = setInterval(poll, 2000); // 2s polling for chain (NSE FNO)
+      }
 
-        const depthBids = tick.bids
-          ?.filter(([p]) => Number.isFinite(p) && p > 0)
-          .map(([price, qty, orders]) => ({ price, qty, orders }));
-        const depthAsks = tick.asks
-          ?.filter(([p]) => Number.isFinite(p) && p > 0)
-          .map(([price, qty, orders]) => ({ price, qty, orders }));
+      return this.pool.subscribe(
+        { exchangeSegment: ins.exchangeSegment, securityId: ins.securityId },
+        (tick: DhanTick) => {
+          if (typeof tick.ltp !== 'number') return;
 
-        onData({
-          ltp: tick.ltp,
-          atp: tick.atp ?? 0,
-          ltq: tick.ltq ?? 0,
-          ltt: tick.ltt ?? 0,
-          volume: tick.volume ?? 0,
-          totalBuyQty: tick.totalBuyQty ?? 0,
-          totalSellQty: tick.totalSellQty ?? 0,
-          oi: tick.openInterest,
-          highOi: tick.highOi,
-          lowOi: tick.lowOi,
-          dayOpen: state.dayOpen,
-          dayHigh: state.dayHigh,
-          dayLow: state.dayLow,
-          dayClose: state.dayClose,
-          depthBids,
-          depthAsks,
-          prevClose: state.prevClose || undefined,
-          prevOi: state.prevOi || undefined,
-        });
-      },
-    ));
+          if (typeof tick.open === 'number') state.dayOpen = tick.open;
+          if (typeof tick.high === 'number') state.dayHigh = tick.high;
+          if (typeof tick.low === 'number') state.dayLow = tick.low;
+          if (typeof tick.close === 'number') state.dayClose = tick.close;
+          if (typeof tick.prevClose === 'number') state.prevClose = tick.prevClose;
+          if (typeof tick.prevOi === 'number') state.prevOi = tick.prevOi;
+
+          const depthBids = tick.bids
+            ?.filter(([p]) => Number.isFinite(p) && p > 0)
+            .map(([price, qty, orders]) => ({ price, qty, orders }));
+          const depthAsks = tick.asks
+            ?.filter(([p]) => Number.isFinite(p) && p > 0)
+            .map(([price, qty, orders]) => ({ price, qty, orders }));
+
+          onData({
+            ltp: tick.ltp,
+            atp: tick.atp ?? 0,
+            ltq: tick.ltq ?? 0,
+            ltt: tick.ltt ?? 0,
+            volume: tick.volume ?? 0,
+            totalBuyQty: tick.totalBuyQty ?? 0,
+            totalSellQty: tick.totalSellQty ?? 0,
+            oi: tick.openInterest,
+            highOi: tick.highOi,
+            lowOi: tick.lowOi,
+            dayOpen: state.dayOpen,
+            dayHigh: state.dayHigh,
+            dayLow: state.dayLow,
+            dayClose: state.dayClose,
+            depthBids,
+            depthAsks,
+            prevClose: state.prevClose || undefined,
+            prevOi: state.prevOi || undefined,
+          });
+        },
+      );
+    });
+
+    return () => {
+      if (pollTimer) clearInterval(pollTimer);
+      unsub();
+    };
   }
 }
 

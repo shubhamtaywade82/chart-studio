@@ -733,24 +733,25 @@ body::before {
 .toast.fade { opacity: 0; }
 .toast-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
 
-/* ── AI Overlay ─────────────────────────────────────────────────────── */
-@keyframes ai-pulse-anim {
-  0%, 100% { background: rgba(255, 82, 82, 0.08); }
-  50%      { background: rgba(255, 82, 82, 0.22); }
-}
-.ai-pulse { animation: ai-pulse-anim 1.2s ease-in-out infinite; }
+/* ── Option Chain ────────────────────────────────────────────────────── */
+.option-chain-wrap { display: flex; flex-direction: column; height: 100%; width: 100%; overflow: hidden; }
+.option-chain-table-container { flex: 1; overflow: auto; width: 100%; position: relative; }
+.chain-summary { display: flex; gap: 20px; padding: 10px 14px; background: rgba(255,255,255,0.02); border-bottom: 1px solid var(--border); font-size: 11px; flex-shrink: 0; }
+.chain-summary .highlight { color: var(--accent); font-weight: bold; }
+.option-chain-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 10px; min-width: 600px; }
+.option-chain-table th, .option-chain-table td { padding: 4px 2px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.03); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.option-chain-table thead { position: sticky; top: 0; background: var(--bg-panel); z-index: 10; }
+.option-chain-table .super-header th { font-size: 9px; letter-spacing: 1px; color: var(--text-dim); padding: 2px; border-bottom: 1px solid var(--border); }
+.option-chain-table .sub-header th { color: var(--text-secondary); font-weight: 500; border-bottom: 1px solid var(--border); }
+.option-chain-table .strike-row:hover { background: rgba(255,255,255,0.03); }
+.option-chain-table .is-atm { background: rgba(124, 77, 255, 0.08) !important; border-top: 1px solid var(--accent-dim); border-bottom: 1px solid var(--accent-dim); }
+.option-chain-table .cell-strike { background: rgba(13, 17, 25, 1); color: var(--text-primary); font-weight: bold; width: 60px; border-left: 1px solid var(--border); border-right: 1px solid var(--border); position: sticky; left: calc(50% - 30px); z-index: 5; }
+.option-chain-table .cell-oi { font-weight: 500; }
+.option-chain-table .cell-ltp { color: var(--text-primary); }
+.option-chain-table .cell-iv { color: var(--cyan); opacity: 0.8; }
+.option-chain-table .cell-chg { font-size: 9px; }
 
-@keyframes ai-toxic-border-anim {
-  0%, 100% { box-shadow: inset 0 0 0 2px rgba(239, 83, 80, 0.35); }
-  50%      { box-shadow: inset 0 0 0 2px rgba(239, 83, 80, 0.75); }
-}
-.ai-toxic-border { animation: ai-toxic-border-anim 1.5s ease-in-out infinite; }
-
-#ai-regime-tag[data-regime="trending-up"]   { color: #00e676; }
-#ai-regime-tag[data-regime="trending-down"] { color: #ff5252; }
-#ai-regime-tag[data-regime="breakout"]      { color: #ffd740; }
-#ai-regime-tag[data-regime="distribution"]  { color: #ef5350; }
-#ai-regime-tag[data-regime="accumulation"]  { color: #26a69a; }
+.panel-content-scroll { overflow-y: auto; scrollbar-width: thin; }
 
 /* ── Smart Money Signals ────────────────────────────────────────────── */
 .sidebar-signals-stack {

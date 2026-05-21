@@ -30,6 +30,7 @@ export interface AnalyticsData {
   dayOpen: number; dayHigh: number; dayLow: number; dayClose: number;
   depthBids: DepthLevel[] | undefined; depthAsks: DepthLevel[] | undefined;
   prevClose: number | undefined; prevOi: number | undefined;
+  optionChain: OptionChainData | undefined;
 }
 
 export type Urgency = 'none' | 'watch_only' | 'next_5min' | 'this_candle' | 'immediate' | 'critical';
@@ -47,6 +48,39 @@ export interface AIAnnotation {
   kind: 'tactical' | 'reflex' | 'narrative' | 'risk' | 'morning_brief' | 'correlation' | 'historical_echo' | 'confluence' | 'strategy_signal';
   ts: number;
   data: unknown;
+}
+
+export interface OptionChainItem {
+  strikePrice: number;
+  callOI: number;
+  callOIChange: number;
+  callVolume: number;
+  callLTP: number;
+  callIV: number;
+  putOI: number;
+  putOIChange: number;
+  putVolume: number;
+  putLTP: number;
+  putIV: number;
+  // Greeks (calculated by adapter)
+  callDelta?: number;
+  callGamma?: number;
+  callTheta?: number;
+  callVega?: number;
+  putDelta?: number;
+  putGamma?: number;
+  putTheta?: number;
+  putVega?: number;
+}
+
+export interface OptionChainData {
+  underlying: string;
+  timestamp: number;
+  strikes: OptionChainItem[];
+  maxPain: number;
+  supportOI: number;
+  resistanceOI: number;
+  spotPrice: number;
 }
 
 export interface ProviderInfo { provider: string; displayName: string; online: boolean; lastSeen: number }
