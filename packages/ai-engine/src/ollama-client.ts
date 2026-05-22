@@ -37,7 +37,9 @@ export class OllamaClient {
 
   constructor() {
     const mode = process.env.OLLAMA_MODE === 'cloud' ? 'cloud' : 'local';
-    this.host = mode === 'cloud' ? 'https://ollama.com' : 'http://localhost:11434';
+    const cloudHost = process.env.OLLAMA_CLOUD_HOST || 'https://your-custom-ollama-server.com';
+    this.host = mode === 'cloud' ? cloudHost : 'http://localhost:11434';
+    this.host = this.host.replace(/\/$/, '');
     this.disabled = process.env.OLLAMA_DISABLE === '1';
     this.apiKey = process.env.OLLAMA_API_KEY;
   }
