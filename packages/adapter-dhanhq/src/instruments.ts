@@ -41,7 +41,7 @@ const segmentFromRow = (exchId: string, instrumentType: string, raw?: string): s
 
   if (type === 'INDEX' || type === 'IDX') return 'IDX_I';
   
-  if (type === 'EQUITY' || type === 'EQ') {
+  if (type === 'EQUITY' || type === 'EQ' || type === 'ES') {
     if (exch === 'NSE') return 'NSE_EQ';
     if (exch === 'BSE') return 'BSE_EQ';
   }
@@ -101,6 +101,7 @@ const parseScripMaster = (csv: string): DhanInstrument[] => {
   const cStrike = idx('STRIKE_PRICE') !== -1 ? idx('STRIKE_PRICE') : idx('SEM_STRIKE_PRICE');
   const cOptionType = idx('OPTION_TYPE') !== -1 ? idx('OPTION_TYPE') : idx('SEM_OPTION_TYPE');
   const cIsin = idx('ISIN');
+  const cUnderlyingSymbol = idx('UNDERLYING_SYMBOL');
 
   const required = [cExch, cSecurityId, cSymbol, cInstrumentType];
   if (required.some((i) => i === -1)) return [];
@@ -113,11 +114,20 @@ const parseScripMaster = (csv: string): DhanInstrument[] => {
     const symbol = (row[cSymbol] ?? '').trim();
     const instrumentType = (row[cInstrumentType] ?? '').trim();
     if (!exchId || !securityId || !symbol || !instrumentType) continue;
+
+    let resolvedSymbol = symbol;
+    if (cUnderlyingSymbol !== -1 && (instrumentType.toUpperCase() === 'ES' || instrumentType.toUpperCase() === 'EQUITY')) {
+      const underlying = (row[cUnderlyingSymbol] ?? '').trim();
+      if (underlying) {
+        resolvedSymbol = underlying;
+      }
+    }
+
     const exchangeSegment = segmentFromRow(exchId, instrumentType, cExchangeSegment !== -1 ? (row[cExchangeSegment] ?? '').trim() : undefined);
     out.push({
       exchangeSegment,
       securityId,
-      symbolName: symbol,
+      symbolName: resolvedSymbol,
       displayName: cDisplay !== -1 ? (row[cDisplay] ?? symbol).trim() || symbol : symbol,
       instrumentType,
       segment: cSegment !== -1 ? (row[cSegment] ?? '').trim() : '',
@@ -207,15 +217,31 @@ export const findInstrument = (symbol: string): DhanInstrument | null => {
     const key = `${seg.toUpperCase()}:${id}`;
     const direct = cache.byKey.get(key);
     if (direct) return direct;
+
+    // If id is not numeric (e.g., symbolName like NSE_EQ:SBIN)
+    if (!/^\d+$/.test(id)) {
+      const targetSeg = seg.toUpperCase();
+      const targetIdNorm = id.toUpperCase().replace(/-EQ$/, '');
+      const matches = cache.rows.filter(
+        (r) =>
+          r.exchangeSegment.toUpperCase() === targetSeg &&
+          (r.symbolName.toUpperCase().replace(/-EQ$/, '') === targetIdNorm ||
+           r.displayName.toUpperCase().replace(/-EQ$/, '') === targetIdNorm)
+      );
+      if (matches.length > 0) {
+        return matches[0] ?? null;
+      }
+    }
   }
 
   const q = symbol.trim().toUpperCase();
   if (!q) return null;
+  const qNorm = q.replace(/-EQ$/, '');
 
   const matches = cache.rows.filter(
     (r) =>
-      r.symbolName.toUpperCase() === q ||
-      r.displayName.toUpperCase() === q ||
+      r.symbolName.toUpperCase().replace(/-EQ$/, '') === qNorm ||
+      r.displayName.toUpperCase().replace(/-EQ$/, '') === qNorm ||
       r.isin?.toUpperCase() === q
   );
 
@@ -267,6 +293,7 @@ export const toInstrumentMeta = (providerId: string, ins: DhanInstrument): Instr
 export const searchInstruments = (rows: DhanInstrument[], query: string, limit: number): DhanInstrument[] => {
   const q = query.trim().toUpperCase();
   if (!q) return rows.slice(0, limit);
+  const qNorm = q.replace(/-EQ$/, '');
   
   // Two-pass search: first collect high-priority segments (Equity/Index),
   // then fill remaining slots with others (FNO/Commodity).
@@ -274,10 +301,13 @@ export const searchInstruments = (rows: DhanInstrument[], query: string, limit: 
   const lowPriority: DhanInstrument[] = [];
 
   for (const r of rows) {
-    const isExactSymbol = r.symbolName.toUpperCase() === q;
-    const hay = `${r.symbolName} ${r.displayName} ${r.exchangeSegment}`.toUpperCase();
+    const rSymbolNorm = r.symbolName.toUpperCase().replace(/-EQ$/, '');
+    const isExactSymbol = rSymbolNorm === qNorm;
     
-    if (hay.includes(q)) {
+    const rDisplayNorm = r.displayName.toUpperCase().replace(/-EQ$/, '');
+    const hay = `${rSymbolNorm} ${rDisplayNorm} ${r.exchangeSegment}`.toUpperCase();
+    
+    if (hay.includes(qNorm)) {
       const seg = r.exchangeSegment;
       const type = r.instrumentType.toUpperCase();
       // Only prioritize true Equity and Indices

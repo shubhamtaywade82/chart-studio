@@ -88,17 +88,44 @@ const zip = (resp: HistoricalResponse, intervalSec: number): Candle[] => {
 };
 
 const intervalToMinutes = (interval: string): number | 'daily' => {
-  const i = interval.trim().toUpperCase();
-  if (i === '1D' || i === 'D' || i === 'DAY' || i === 'DAILY') return 'daily';
-  const num = Number(i.replace(/[^0-9]/g, ''));
-  if (!Number.isFinite(num) || num <= 0) return 1;
+  const i = interval.trim();
+  const unitMatch = i.match(/^(\d+)(.*)$/);
+  if (!unitMatch) {
+    const upper = i.toUpperCase();
+    if (upper === 'D' || upper === 'DAY' || upper === 'DAILY') return 'daily';
+    return 1;
+  }
+  
+  const num = Number(unitMatch[1]);
+  const rawUnit = (unitMatch[2] ?? '').trim();
+  const unit = rawUnit.toUpperCase();
+
+  if (rawUnit === 'M') {
+    // Upper case M is Month in standard chart systems
+    return 'daily';
+  }
+
+  let mins = num;
+  if (unit === 'H' || unit === 'HR' || unit === 'HOUR' || unit === 'HOURS') {
+    mins = num * 60;
+  } else if (unit === 'D' || unit === 'DAY' || unit === 'DAYS' || unit === 'W' || unit === 'WEEK' || unit === 'WEEKS' || unit === 'MONTH' || unit === 'MONTHS') {
+    return 'daily';
+  }
+
   // Dhan intraday supports 1, 5, 15, 25, 60
-  if ([1, 5, 15, 25, 60].includes(num)) return num;
-  if (num < 5) return 1;
-  if (num < 15) return 5;
-  if (num < 25) return 15;
-  if (num < 60) return 25;
+  if ([1, 5, 15, 25, 60].includes(mins)) return mins;
+  if (mins < 5) return 1;
+  if (mins < 15) return 5;
+  if (mins < 25) return 15;
+  if (mins < 60) return 25;
   return 60;
+};
+
+const getDhanInstrumentType = (rawType: string): string => {
+  const t = rawType.toUpperCase();
+  if (t === 'ES' || t === 'EQUITY' || t === 'EQ') return 'EQUITY';
+  if (t === 'INDEX' || t === 'IDX') return 'INDEX';
+  return t;
 };
 
 const IST_OFFSET = 5.5 * 60 * 60 * 1000;
@@ -137,7 +164,7 @@ export const fetchCandles = async (
     const { data } = await client.post<HistoricalResponse>('/v2/charts/historical', {
       securityId: ins.securityId,
       exchangeSegment: ins.exchangeSegment,
-      instrument: ins.instrumentType,
+      instrument: getDhanInstrumentType(ins.instrumentType),
       fromDate: formatDate(startTime),
       toDate: formatDate(endTime),
     });
@@ -151,7 +178,7 @@ export const fetchCandles = async (
       const { data } = await client.post<HistoricalResponse>('/v2/charts/intraday', {
         securityId: ins.securityId,
         exchangeSegment: ins.exchangeSegment,
-        instrument: ins.instrumentType,
+        instrument: getDhanInstrumentType(ins.instrumentType),
         interval: mode,
         fromDate: formatDateTime(cursor),
         toDate: formatDateTime(segEnd),
