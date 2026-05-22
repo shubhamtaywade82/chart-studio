@@ -45,7 +45,7 @@ One sentence:`;
     prompt,
     temperature: 0.2,
     numPredict: 80,
-    timeoutMs: 4_000,
+    timeoutMs: process.env.OLLAMA_MODE === 'cloud' ? 20_000 : 4_000,
   });
 
   if (text) {

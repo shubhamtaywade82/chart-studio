@@ -49,7 +49,7 @@ JSON response only:
     prompt,
     temperature: 0.05,
     numPredict: 250,
-    timeoutMs: 5_000,
+    timeoutMs: process.env.OLLAMA_MODE === 'cloud' ? 30_000 : 5_000,
   });
 
   if (result) {

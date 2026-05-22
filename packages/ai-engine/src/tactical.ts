@@ -21,7 +21,7 @@ export async function tactical(
     prompt,
     temperature: 0.05,
     numPredict: 700,
-    timeoutMs: 10_000,
+    timeoutMs: process.env.OLLAMA_MODE === 'cloud' ? 45_000 : 10_000,
   });
 
   if (result) {

@@ -156,8 +156,12 @@ export class AIOverlayManager {
 
   // ── 5. Narrative ticker ──
   private narrativeInterval: any = null;
+  private lastNarrativeText: string = '';
 
   applyNarrative(text: string, urgency: Urgency): void {
+    if (this.lastNarrativeText === text) return;
+    this.lastNarrativeText = text;
+
     const el = this.ensureNarrativeBar();
     const body = document.getElementById('ai-hud-body');
     const status = document.getElementById('ai-hud-status');
