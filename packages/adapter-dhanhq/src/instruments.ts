@@ -134,6 +134,7 @@ const parseScripMaster = (csv: string): DhanInstrument[] => {
 };
 
 let cache: { ts: number; rows: DhanInstrument[]; byKey: Map<string, DhanInstrument> } | null = null;
+let csvLoaded = false;
 
 const buildIndex = (rows: DhanInstrument[]): Map<string, DhanInstrument> => {
   const m = new Map<string, DhanInstrument>();
@@ -142,12 +143,13 @@ const buildIndex = (rows: DhanInstrument[]): Map<string, DhanInstrument> => {
 };
 
 export const loadInstruments = async (overrideUrl?: string): Promise<DhanInstrument[]> => {
-  if (cache && Date.now() - cache.ts < REFRESH_MS) return cache.rows;
+  if (csvLoaded && cache && Date.now() - cache.ts < REFRESH_MS) return cache.rows;
   const url = overrideUrl ?? SCRIP_MASTER_URL;
   try {
     const { data } = await axios.get<string>(url, { timeout: 60_000, responseType: 'text', validateStatus: (s) => s === 200 });
     const rows = parseScripMaster(data);
     cache = { ts: Date.now(), rows, byKey: buildIndex(rows) };
+    csvLoaded = true;
     return rows;
   } catch (err) {
     console.error(`[dhanhq] failed to load instruments from ${url}`, err);
@@ -188,6 +190,7 @@ export const fetchInstrumentsFromApi = async (client: AxiosInstance, segments: s
   }
   if (all.length > 0) {
     cache = { ts: Date.now(), rows: all, byKey: buildIndex(all) };
+    csvLoaded = false;
   }
   return all;
 };
