@@ -152,9 +152,13 @@ export class PropDeskAI {
         prevOi: data.prevOi ?? 0,
         bids: data.depthBids ?? [],
         asks: data.depthAsks ?? [],
+        fundingRate: (data as any).cryptoMetrics?.fundingRate,
+        longShortRatio: (data as any).cryptoMetrics?.longShortRatio,
+        basisPct: (data as any).cryptoMetrics?.basisPct,
       },
       derived: { vwapDeviation: 0, cvd: 0, oiChange: 0, depthImbalance: 0, tradeIntensity: 0, volatilityRegime: 'normal', toxicity: 0 },
     };
+
     snap.derived = state.derived.computeDerived(snap.tick, state.candles);
 
     // Track for correlation.

@@ -28,7 +28,12 @@ export interface MicrostructureSnapshot {
     prevOi: number;
     bids: Array<{ price: number; qty: number; orders: number }>;
     asks: Array<{ price: number; qty: number; orders: number }>;
+    // Crypto specific
+    fundingRate?: number;
+    longShortRatio?: number;
+    basisPct?: number;
   };
+
   derived: {
     /** (ltp - atp) / atp */
     vwapDeviation: number;
