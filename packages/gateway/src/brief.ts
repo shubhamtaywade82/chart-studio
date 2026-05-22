@@ -140,16 +140,18 @@ async function ollamaGenerate(prompt: string, system: string): Promise<string | 
   if (!ollamaAvailable()) return null;
 
   try {
-    const res = await ollamaClient.generate({
+    const res = await ollamaClient.chat({
       model: BRIEF_MODEL,
-      prompt,
-      system,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: prompt }
+      ],
       stream: false,
       options: { temperature: 0.25, num_predict: 600, num_ctx: 4096 },
     });
     
     ollamaFailures = 0;
-    return res.response || null;
+    return res.message.content || null;
   } catch (err) {
     ollamaFailures += 1;
     if (ollamaFailures >= 3) {
