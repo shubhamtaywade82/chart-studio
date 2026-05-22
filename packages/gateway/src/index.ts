@@ -155,15 +155,18 @@ const main = async (): Promise<void> => {
       const interval = url.searchParams.get('interval') ?? '1m';
       const endTime = Number(url.searchParams.get('endTime') ?? 0);
       const limit = Math.min(1500, Math.max(1, Number(url.searchParams.get('limit') ?? 500)));
+      console.log(`[Gateway] GET /candles/history provider=${provider} symbol=${symbol} interval=${interval} endTime=${endTime} limit=${limit}`);
       if (!provider || !symbol || !endTime) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'provider, symbol, endTime required' }));
         return;
       }
       bridge.discover(provider, 'candles', { symbol, interval, endTime, limit }, 15_000).then((bars) => {
+        console.log(`[Gateway] discover returned ${bars ? (bars as any[]).length : 'null'} bars`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(bars ?? []));
       }).catch((err) => {
+        console.error(`[Gateway] discover failed:`, err);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
       });
@@ -212,16 +215,40 @@ const main = async (): Promise<void> => {
         
         const tags = await vRes.json() as any;
         const models = (tags.models || []).map((m: any) => m.name);
+
+        const tacticalModel = process.env.AI_TACTICAL_MODEL ?? 'llama3.1:8b';
+        const narrativeModel = process.env.AI_NARRATIVE_MODEL ?? 'llama3.2:3b';
+        const riskModel = process.env.AI_RISK_MODEL ?? 'codellama:7b';
+        const strategicModel = process.env.AI_STRATEGIC_MODEL ?? 'mixtral:8x7b';
+
+        const getCleanName = (m: string) => {
+          if (process.env.OLLAMA_MODE === 'cloud' && (m.endsWith('-cloud') || m.endsWith(':cloud'))) {
+            return m.slice(0, -6);
+          }
+          return m;
+        };
+
+        const reqModels = Array.from(new Set([
+          getCleanName(tacticalModel),
+          getCleanName(narrativeModel),
+          getCleanName(riskModel),
+          getCleanName(strategicModel)
+        ]));
+
+        const required = reqModels.map(modelId => {
+          const baseName = modelId.split(':')[0]!;
+          return {
+            id: modelId,
+            available: models.some((m: string) => m === modelId || m.startsWith(baseName))
+          };
+        });
         
         return {
           status: 'ok',
           host: ollamaHost,
           usingApiKey: !!apiKey,
           models,
-          required: [
-            { id: 'llama3.1:8b', available: models.some((m: string) => m.startsWith('llama3.1')) },
-            { id: 'llama3.2:3b', available: models.some((m: string) => m.startsWith('llama3.2')) }
-          ]
+          required
         };
       };
 

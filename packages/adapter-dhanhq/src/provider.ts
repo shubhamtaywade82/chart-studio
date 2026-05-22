@@ -97,9 +97,18 @@ export class DhanProvider implements MarketDataProvider {
   // ── Snapshots ────────────────────────────────────────────────────────
 
   async getCandles(symbol: string, interval: string, opts: { limit?: number; startTime?: number; endTime?: number } = {}): Promise<Candle[]> {
+    console.log(`[getCandles] symbol: ${symbol}, interval: ${interval}, opts:`, opts);
     const ins = await findInstrumentAsync(symbol, this.cfg.scripMasterUrl);
+    console.log(`[getCandles] found instrument:`, ins ? `${ins.exchangeSegment}:${ins.securityId} (${ins.symbolName})` : 'null');
     if (!ins) return [];
-    return fetchCandles(this.client, ins, interval, opts);
+    try {
+      const res = await fetchCandles(this.client, ins, interval, opts);
+      console.log(`[getCandles] fetched ${res.length} candles`);
+      return res;
+    } catch (err) {
+      console.error(`[getCandles] error fetching candles:`, err);
+      return [];
+    }
   }
 
   async getOrderBook(symbol: string, limit?: number): Promise<OrderBookSnapshot | null> {

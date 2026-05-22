@@ -203,8 +203,37 @@ export const fetchInstrumentsFromApi = async (client: AxiosInstance, segments: s
 export const findInstrument = (symbol: string): DhanInstrument | null => {
   if (!cache) return null;
   const [seg, id] = symbol.split(':');
-  if (!seg || !id) return null;
-  return cache.byKey.get(`${seg.toUpperCase()}:${id}`) ?? null;
+  if (seg && id) {
+    const key = `${seg.toUpperCase()}:${id}`;
+    const direct = cache.byKey.get(key);
+    if (direct) return direct;
+  }
+
+  const q = symbol.trim().toUpperCase();
+  if (!q) return null;
+
+  const matches = cache.rows.filter(
+    (r) =>
+      r.symbolName.toUpperCase() === q ||
+      r.displayName.toUpperCase() === q ||
+      r.isin?.toUpperCase() === q
+  );
+
+  if (matches.length === 0) return null;
+
+  // Prioritize segments: Index (IDX_I) -> Equity (NSE_EQ/BSE_EQ) -> Futures -> Options -> Others
+  const getPriority = (r: DhanInstrument): number => {
+    const s = r.exchangeSegment.toUpperCase();
+    const type = r.instrumentType.toUpperCase();
+    if (s === 'IDX_I') return 1;
+    if (s === 'NSE_EQ' || s === 'BSE_EQ') return 2;
+    if (type.startsWith('FUT') || type === 'FT') return 3;
+    if (type.startsWith('OPT') || type === 'OP') return 4;
+    return 5;
+  };
+
+  matches.sort((a, b) => getPriority(a) - getPriority(b));
+  return matches[0] ?? null;
 };
 
 /**

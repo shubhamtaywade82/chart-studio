@@ -24,8 +24,27 @@ export const createClient = (tokens: TokenProvider): AxiosInstance => {
     return cfg;
   });
   client.interceptors.response.use(undefined, async (err) => {
-    if (err?.response?.status === 401) {
+    const isUnauthorized = err?.response?.status === 401;
+    const isInvalidToken = err?.response?.data?.errorCode === 'DH-906' || 
+                           err?.response?.data?.errorMessage === 'Invalid Token';
+    if (isUnauthorized || isInvalidToken) {
+      console.log(`[dhanhq-client] invalidating tokens: isUnauthorized=${isUnauthorized}, isInvalidToken=${isInvalidToken}`);
       tokens.invalidate();
+      
+      const config = err.config;
+      if (config && !config._retry) {
+        config._retry = true;
+        console.log(`[dhanhq-client] retrying original request: ${config.method?.toUpperCase()} ${config.url}`);
+        const creds = await tokens.get();
+        if (config.headers && typeof config.headers.set === 'function') {
+          config.headers.set('access-token', creds.accessToken);
+          config.headers.set('client-id', creds.clientId);
+        } else if (config.headers) {
+          config.headers['access-token'] = creds.accessToken;
+          config.headers['client-id'] = creds.clientId;
+        }
+        return client(config);
+      }
     }
     throw err;
   });
@@ -95,9 +114,24 @@ export const fetchCandles = async (
 ): Promise<Candle[]> => {
   const mode = intervalToMinutes(interval);
   const endTime = opts.endTime ?? Date.now();
-  const limit = Math.min(2000, Math.max(50, opts.limit ?? 500));
+  const targetLimit = opts.limit ?? 500;
+  const safeLimit = Math.min(2000, Math.max(1, targetLimit));
   const intervalSec = mode === 'daily' ? 86_400 : mode * 60;
-  const startTime = opts.startTime ?? endTime - limit * intervalSec * 1000;
+
+  const calendarBuffer = mode === 'daily' ? 1.8 : 8;
+  const minLookbackMs = mode === 'daily' ? 365 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+  const calculatedLookback = safeLimit * intervalSec * 1000 * calendarBuffer;
+  const lookbackMs = Math.max(minLookbackMs, calculatedLookback);
+
+  let startTime = opts.startTime ?? (endTime - lookbackMs);
+  if (mode !== 'daily') {
+    const maxIntradayLookback = 90 * 24 * 60 * 60 * 1000;
+    if (endTime - startTime > maxIntradayLookback) {
+      startTime = endTime - maxIntradayLookback;
+    }
+  }
+
+  const out: Candle[] = [];
 
   if (mode === 'daily') {
     const { data } = await client.post<HistoricalResponse>('/v2/charts/historical', {
@@ -107,28 +141,34 @@ export const fetchCandles = async (
       fromDate: formatDate(startTime),
       toDate: formatDate(endTime),
     });
-    return zip(data, intervalSec);
+    out.push(...zip(data, intervalSec));
+  } else {
+    // Intraday: cap at 90 days, page if needed
+    const NINETY = 90 * 24 * 60 * 60 * 1000;
+    let cursor = startTime;
+    while (cursor < endTime) {
+      const segEnd = Math.min(endTime, cursor + NINETY);
+      const { data } = await client.post<HistoricalResponse>('/v2/charts/intraday', {
+        securityId: ins.securityId,
+        exchangeSegment: ins.exchangeSegment,
+        instrument: ins.instrumentType,
+        interval: mode,
+        fromDate: formatDateTime(cursor),
+        toDate: formatDateTime(segEnd),
+      });
+      out.push(...zip(data, intervalSec));
+      if (segEnd >= endTime) break;
+      cursor = segEnd + 1;
+    }
   }
 
-  // Intraday: cap at 90 days, page if needed
-  const NINETY = 90 * 24 * 60 * 60 * 1000;
-  const out: Candle[] = [];
-  let cursor = startTime;
-  while (cursor < endTime) {
-    const segEnd = Math.min(endTime, cursor + NINETY);
-    const { data } = await client.post<HistoricalResponse>('/v2/charts/intraday', {
-      securityId: ins.securityId,
-      exchangeSegment: ins.exchangeSegment,
-      instrument: ins.instrumentType,
-      interval: mode,
-      fromDate: formatDateTime(cursor),
-      toDate: formatDateTime(segEnd),
-    });
-    out.push(...zip(data, intervalSec));
-    if (segEnd >= endTime) break;
-    cursor = segEnd + 1;
-  }
-  return out;
+  // Deduplicate, sort, filter <= endTime, and slice to the requested limit
+  const uniqueCandles = Array.from(new Set(out.map((c) => c.openTime)))
+    .map((ot) => out.find((c) => c.openTime === ot)!)
+    .filter((c) => c.openTime <= endTime)
+    .sort((a, b) => a.openTime - b.openTime);
+
+  return uniqueCandles.slice(-safeLimit);
 };
 
 interface FullDepthResponse {

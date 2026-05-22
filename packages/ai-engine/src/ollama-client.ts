@@ -26,6 +26,7 @@ export class OllamaClient {
   private disabled: boolean;
   private failureCount = 0;
   private circuitOpenUntil = 0;
+  private requestQueue: Promise<any> = Promise.resolve();
 
   constructor() {
     const host = (process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/$/, '');
@@ -39,6 +40,12 @@ export class OllamaClient {
     this.disabled = process.env.OLLAMA_DISABLE === '1';
   }
 
+  private async enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.requestQueue.then(fn);
+    this.requestQueue = next.catch(() => {});
+    return next;
+  }
+
   isAvailable(): boolean {
     if (this.disabled) return false;
     if (Date.now() < this.circuitOpenUntil) return false;
@@ -48,31 +55,39 @@ export class OllamaClient {
   async generate(opts: OllamaGenerateOptions): Promise<string | null> {
     if (!this.isAvailable()) return null;
 
-    try {
-      const messages = [];
-      if (opts.system) {
-        messages.push({ role: 'system', content: opts.system });
-      }
-      messages.push({ role: 'user', content: opts.prompt });
-
-      const res = await this.client.chat({
-        model: opts.model,
-        messages,
-        stream: false,
-        format: opts.json ? 'json' : undefined,
-        options: {
-          temperature: opts.temperature ?? 0.05,
-          num_predict: opts.numPredict ?? 512,
-          num_ctx: 4096,
-        },
-      });
-      
-      this.failureCount = 0;
-      return res.message.content || null;
-    } catch (err) {
-      this.recordFailure(err);
-      return null;
+    let model = opts.model;
+    if (process.env.OLLAMA_MODE === 'cloud' && (model.endsWith('-cloud') || model.endsWith(':cloud'))) {
+      model = model.slice(0, -6);
     }
+
+    return this.enqueue(async () => {
+      if (!this.isAvailable()) return null;
+      try {
+        const messages = [];
+        if (opts.system) {
+          messages.push({ role: 'system', content: opts.system });
+        }
+        messages.push({ role: 'user', content: opts.prompt });
+
+        const res = await this.client.chat({
+          model,
+          messages,
+          stream: false,
+          format: opts.json ? 'json' : undefined,
+          options: {
+            temperature: opts.temperature ?? 0.05,
+            num_predict: opts.numPredict ?? 512,
+            num_ctx: 4096,
+          },
+        });
+        
+        this.failureCount = 0;
+        return res.message.content || null;
+      } catch (err) {
+        this.recordFailure(err);
+        return null;
+      }
+    });
   }
 
   async generateJson<T>(opts: OllamaGenerateOptions): Promise<T | null> {
@@ -91,18 +106,26 @@ export class OllamaClient {
   async embed(opts: OllamaEmbeddingOptions): Promise<number[] | null> {
     if (!this.isAvailable()) return null;
 
-    try {
-      const res = await this.client.embeddings({
-        model: opts.model,
-        prompt: opts.prompt,
-      });
-      
-      this.failureCount = 0;
-      return res.embedding ?? null;
-    } catch (err) {
-      this.recordFailure(err);
-      return null;
+    let model = opts.model;
+    if (process.env.OLLAMA_MODE === 'cloud' && (model.endsWith('-cloud') || model.endsWith(':cloud'))) {
+      model = model.slice(0, -6);
     }
+
+    return this.enqueue(async () => {
+      if (!this.isAvailable()) return null;
+      try {
+        const res = await this.client.embeddings({
+          model,
+          prompt: opts.prompt,
+        });
+        
+        this.failureCount = 0;
+        return res.embedding ?? null;
+      } catch (err) {
+        this.recordFailure(err);
+        return null;
+      }
+    });
   }
 
   private recordFailure(err: unknown): void {
