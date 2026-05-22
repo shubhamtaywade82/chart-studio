@@ -44,6 +44,7 @@
 
       <div class="topbar-right">
         <div id="interval-bar" class="tf-tabs"></div>
+        <div id="expiry-countdown-host" style="margin-left: 12px;"></div>
         <button id="watchlist-toggle" class="icon-btn" title="Toggle Watchlist (Ctrl+L)" aria-label="Toggle watchlist">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15 8 22 9 17 14 18 21 12 18 6 21 7 14 2 9 9 8 12 2"/></svg>
         </button>
@@ -123,10 +124,13 @@
         <nav class="sidebar-tab-bar" role="tablist" aria-label="Sidebar views">
           <button type="button" class="sidebar-tab active" role="tab" aria-selected="true" data-tab="live">Live</button>
           <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="tape">Tape</button>
+          <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="options">Options</button>
           <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="insights">Insights</button>
           <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="alerts">Alerts</button>
           <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="scripts">Scripts</button>
           <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="smart-signals">Smart Money</button>
+          <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="risk">Risk</button>
+          <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="crypto">Crypto</button>
         </nav>
         <div class="sidebar-tab-panels">
           <!-- Live: Sentiment + Microstructure + Order Book -->
@@ -167,7 +171,7 @@
                 <div class="book-mark-block">
                   <div id="book-mark-val" class="book-mark-val is-empty">—</div>
                   <div class="book-mark-sub">
-                    <span>Mid price</span>
+                    <span>Spread</span>
                     <span id="ob-spread" class="book-spread-inline"></span>
                   </div>
                 </div>
@@ -192,9 +196,43 @@
             </div>
           </div>
 
+          <!-- Options: Strike Ladder -->
+          <div class="sidebar-tab-pane" role="tabpanel" data-tab-pane="options" aria-hidden="true">
+            <div class="panel sidebar-inner-panel">
+              <div class="panel-header">
+                <h2 class="panel-title">NSE Option Chain</h2>
+                <span class="mono-sm dim">Live Greeks</span>
+              </div>
+              <div id="option-chain-panel" class="option-chain-panel"></div>
+            </div>
+            <div class="panel sidebar-inner-panel" style="margin-top: 10px;">
+              <div class="panel-header">
+                <h2 class="panel-title">IV Skew (Smile)</h2>
+              </div>
+              <div id="iv-skew-panel" style="height: 200px;"></div>
+              
+              <div class="panel sidebar-inner-panel" style="margin-top: 10px;">
+                <div class="panel-header">
+                  <h2 class="panel-title">Straddle Tracker</h2>
+                </div>
+                <div id="straddle-dashboard-host"></div>
+              </div>
+            </div>
+          </div>
+
           <!-- Insights -->
           <div class="sidebar-tab-pane" role="tabpanel" data-tab-pane="insights" aria-hidden="true">
             <div class="sidebar-insights-stack">
+              <div class="panel sidebar-inner-panel" id="morning-brief-panel">
+                <div class="panel-header">
+                  <h2 class="panel-title">Strategic Morning Brief</h2>
+                  <span id="morning-brief-time" class="mono-sm dim">Awaiting...</span>
+                </div>
+                <div id="morning-brief-body" class="morning-brief-body">
+                   <div class="empty-hint">Global macro analysis loading...</div>
+                </div>
+              </div>
+
               <div class="panel sidebar-inner-panel" id="signals-panel">
                 <div class="panel-header">
                   <h2 class="panel-title">Strategy Signals</h2>
@@ -214,6 +252,22 @@
                   <div class="sig-row"><div class="sig-label">CHoCH</div><div id="sig-choch" class="sig-value">—</div></div>
                   <div class="sig-section-header">MTF Stack</div>
                   <div class="sig-row"><div class="sig-label">Direction</div><div id="sig-mtf-dir" class="sig-value">—</div></div>
+              <!-- Risk & Margin Engine (Week 2) --> 
+              <div class="panel sidebar-inner-panel"> 
+                <div class="panel-header"> 
+                  <h2 class="panel-title">Margin Utilization</h2> 
+                  <span class="mono-sm dim">Live Risk</span> 
+                </div> 
+                <div id="margin-gauge-panel"></div> 
+              </div> 
+
+              <div class="panel sidebar-inner-panel"> 
+                <div class="panel-header"> 
+                  <h2 class="panel-title">Portfolio Greeks</h2> 
+                  <span class="mono-sm dim">Delta Neutral</span> 
+                </div> 
+                <div id="greeks-panel" class="greeks-panel-host"></div> 
+              </div>
                   <div class="sig-row"><div class="sig-label">Pass</div><div id="sig-mtf-pass" class="sig-value">—</div></div>
                   <div id="sig-mtf-reasons" class="reasons-list"></div>
                   <div class="sig-section-header">Trend Matrix</div>
@@ -229,12 +283,18 @@
               </div>
               <div class="panel sidebar-inner-panel" id="ai-brief-panel">
                 <div class="panel-header">
-                  <h2 class="panel-title">AI Brief</h2>
-                  <span id="ai-brief-status" class="mono-sm dim">offline</span>
+                  <h2 class="panel-title">AI Brief & Trade Cards</h2>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <button id="ai-test-conn" class="btn-icon-sm" title="Test AI Connection">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    </button>
+                    <span id="ai-brief-status" class="status-badge">offline</span>
+                  </div>
                 </div>
-                <div id="ai-brief-body" class="ai-brief-body">
-                </div>
+                <div id="ai-brief-body" class="ai-brief-body"></div>
+              </div>
 
+                <div id="ai-trade-card-host" style="margin-top: 10px;"></div>
               </div>
             </div>
           </div>
@@ -285,6 +345,36 @@
               </div>
             </div>
           </div>
+
+          <!-- Risk -->
+          <div class="sidebar-tab-pane" role="tabpanel" data-tab-pane="risk" aria-hidden="true">
+            <div class="sidebar-risk-stack" style="display:flex; flex-direction:column; gap:10px;">
+              <div class="panel sidebar-inner-panel">
+                <div class="panel-header">
+                  <h2 class="panel-title">Margin & VaR</h2>
+                </div>
+                <div id="margin-gauge-panel"></div>
+              </div>
+              <div class="panel sidebar-inner-panel">
+                <div class="panel-header">
+                  <h2 class="panel-title">Portfolio Greeks</h2>
+                </div>
+                <div id="greeks-panel-container"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="sidebar-tab-pane" role="tabpanel" data-tab-pane="crypto" aria-hidden="true">
+            <div class="sidebar-risk-stack" style="display:flex; flex-direction:column; gap:10px;">
+              <div class="panel sidebar-inner-panel">
+                <div class="panel-header">
+                  <h2 class="panel-title">Crypto Futures Analytics</h2>
+                </div>
+                <div id="crypto-dashboard-host"></div>
+              </div>
+            </div>
+          </div>
+
         </div>
       </aside>
     </main>

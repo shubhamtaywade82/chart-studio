@@ -71,6 +71,7 @@ export class BinanceStreamPool {
     this.ws = ws;
 
     ws.on('open', () => {
+      console.log(`[binance] WS open to ${url}`);
       this.reconnectAttempts = 0;
     });
     ws.on('message', (raw) => {
@@ -83,7 +84,7 @@ export class BinanceStreamPool {
       const data = (parsed as { data?: unknown }).data;
       for (const fn of set) fn(data);
     });
-    ws.on('error', () => { /* swallow; close will reconnect */ });
+    ws.on('error', (err) => { console.error('[binance] WS error', err.message); });
     ws.on('close', () => {
       if (this.ws !== ws) return;
       this.ws = null;

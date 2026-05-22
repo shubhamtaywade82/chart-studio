@@ -35,7 +35,7 @@ const persist = (list: PriceAlert[]): void => {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch { /* noop */ }
 };
 
-const newId = (): string => `a${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+const newId = (): string => crypto.randomUUID();
 
 /**
  * Client-side alert engine. Subscribes to bookTicker for every active alert's

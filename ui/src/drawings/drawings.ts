@@ -31,7 +31,7 @@ const loadStore = (): StoredDrawings => {
 const persistStore = (s: StoredDrawings): void => {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch { /* noop */ }
 };
-const idGen = (): string => `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+const idGen = (): string => crypto.randomUUID();
 
 /**
  * Drawing layer v1: horizontal price lines + trend lines. Persists

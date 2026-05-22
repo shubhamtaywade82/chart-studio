@@ -129,31 +129,69 @@ export class OrderBookPanel {
     // 3. Render mid price and spread divider
     const bestBid = bidRows[0]?.price;
     const bestAsk = askRows[askRows.length - 1]?.price;
+    
+    // Calculate overall imbalance (visible depth)
+    const bidTotal = runningBidTotal;
+    const askTotal = runningAskTotal;
+    const totalVisible = bidTotal + askTotal;
+    const bidRatio = totalVisible > 0 ? (bidTotal / totalVisible) : 0.5;
+    
+    const imbEl = document.getElementById('book-imbalance');
+    if (imbEl) {
+      const pct = (bidRatio * 100).toFixed(0);
+      imbEl.textContent = `${pct}% B`;
+      imbEl.className = `imbalance-badge ${bidRatio > 0.6 ? 'bull' : bidRatio < 0.4 ? 'bear' : 'neutral'}`;
+      imbEl.style.setProperty('--imb-ratio', `${bidRatio * 100}%`);
+    }
+
+    const headerHtml = `
+      <div class="ob-header">
+        <span class="hdr-qty">Size</span>
+        <span class="hdr-px">Price</span>
+        <span class="hdr-total">Total</span>
+      </div>
+    `;
+
+    const markEl = document.getElementById('book-mark-val');
+
     if (bestBid !== undefined && bestAsk !== undefined && bestAsk >= bestBid) {
       const spread = bestAsk - bestBid;
       const mid = (bestAsk + bestBid) / 2;
       const bps = (spread / mid) * 10_000;
       
       this.spreadEl.textContent = `${fmtPx(spread)} (${bps.toFixed(2)} bps)`;
+      if (markEl) {
+        markEl.textContent = fmtPx(mid);
+        markEl.classList.remove('is-empty');
+      }
       
       this.root.innerHTML = `
-        ${asksHtml}
+        ${headerHtml}
+        <div class="ob-section asks">${asksHtml}</div>
         <div class="spread">
-          <span class="mid-title">Mid Price</span>
-          <span class="mid-val">${fmtPx(mid)}</span>
-          <span class="spread-val">${fmtPx(spread)} (${bps.toFixed(1)} bps)</span>
+          <div class="spread-line">
+            <span class="mid-val">${fmtPx(mid)}</span>
+            <span class="spread-val">${fmtPx(spread)}</span>
+          </div>
+          <div class="imbalance-bar-wrap">
+            <div class="imbalance-bar-fill" style="width: ${bidRatio * 100}%"></div>
+          </div>
         </div>
-        ${bidsHtml}
+        <div class="ob-section bids">${bidsHtml}</div>
       `;
     } else {
       this.spreadEl.textContent = '';
+      if (markEl) {
+        markEl.textContent = '—';
+        markEl.classList.add('is-empty');
+      }
       this.root.innerHTML = `
-        ${asksHtml}
-        <div class="spread">
-          <span class="mid-title">Spread</span>
+        ${headerHtml}
+        <div class="ob-section asks">${asksHtml}</div>
+        <div class="spread empty">
           <span class="mid-val">—</span>
         </div>
-        ${bidsHtml}
+        <div class="ob-section bids">${bidsHtml}</div>
       `;
     }
   }

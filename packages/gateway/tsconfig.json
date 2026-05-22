@@ -6,5 +6,8 @@
     "composite": true
   },
   "include": ["src/**/*"],
-  "references": [{ "path": "../adapter-core" }]
+  "references": [
+    { "path": "../adapter-core" },
+    { "path": "../ai-engine" }
+  ]
 }

@@ -1,7 +1,7 @@
 import type { MicrostructureSnapshot, TacticalAnalysis, TradeSetup, AILevel, AIDivergence } from './types';
 import type { OllamaClient } from './ollama-client';
 
-const TACTICAL_MODEL = process.env.AI_TACTICAL_MODEL ?? 'mistral:7b';
+const TACTICAL_MODEL = process.env.AI_TACTICAL_MODEL ?? 'llama3.1:8b';
 
 /**
  * Tactical layer: ~120ms inference per call. Runs at most once every 5s or
@@ -21,7 +21,7 @@ export async function tactical(
     prompt,
     temperature: 0.05,
     numPredict: 700,
-    timeoutMs: 10_000,
+    timeoutMs: process.env.OLLAMA_MODE === 'cloud' ? 45_000 : 10_000,
   });
 
   if (result) {

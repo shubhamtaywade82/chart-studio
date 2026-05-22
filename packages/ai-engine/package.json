@@ -22,8 +22,10 @@
   },
   "dependencies": {
     "@chart-studio/adapter-core": "0.1.0",
+    "axios": "^1.16.1",
     "ioredis": "^5.10.1",
-    "ollama": "^0.5.18"
+    "ollama": "^0.5.18",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "tsx": "^4.20.6",

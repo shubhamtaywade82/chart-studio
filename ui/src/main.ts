@@ -16,6 +16,15 @@ import { INDICATORS, type ActiveIndicator } from './indicators/registry';
 import { AIBriefPanel } from './panels/ai-brief';
 import { StrategySignalsPanel } from './panels/strategy-signals';
 import { SmartSignalsPanel } from './panels/smart-signals';
+import { OptionChainPanel } from './panels/option-chain';
+import { GreeksPanel } from './panels/greeks-panel';
+import { MarginGauge } from './panels/margin-gauge';
+import { AiTradeCard } from './panels/ai-trade-card';
+import { IVSkewPrimitive } from './chart/iv-skew-primitive';
+import { CryptoDashboard } from './panels/crypto-dashboard';
+import { StraddleDashboard } from './panels/straddle-dashboard';
+import { ExpiryCountdown } from './panels/expiry-countdown';
+import { MorningBriefPanel } from './panels/morning-brief';
 
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
@@ -78,8 +87,29 @@ const main = (): void => {
   const aiBrief = new AIBriefPanel();
   const strategySignals = new StrategySignalsPanel(client);
   const smartSignals = new SmartSignalsPanel();
+  const morningBriefPanel = new MorningBriefPanel();
+  const optionChain = new OptionChainPanel(document.getElementById('option-chain-panel')!);
+  const aiTradeCard = new AiTradeCard(document.getElementById('ai-trade-card-host')!);
+  const greeksPanel = new GreeksPanel(document.getElementById('greeks-panel')!);
+  const marginGauge = new MarginGauge(document.getElementById('margin-gauge-panel')!, () => {
+    fetch(`/api/risk?symbol=${activeState?.symbol || 'NIFTY'}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && !data.error) {
+          marginGauge.update(data);
+          greeksPanel.update(data);
+        }
+      });
+  });
+  const ivSkewPanel = new IVSkewPrimitive(document.getElementById('iv-skew-panel')!);
+  const cryptoDashboard = new CryptoDashboard(document.getElementById('crypto-dashboard-host')!);
+  const straddleDashboard = new StraddleDashboard(document.getElementById('straddle-dashboard-host')!);
+  const expiryCountdown = new ExpiryCountdown(document.getElementById('expiry-countdown-host')!);
+
+
 
   let activeState: AppState | null = parseHash();
+
   let currentCandles: Candle[] = [];
   const unsubs: Array<() => void> = [];
   // Trade-tape running counters (mirror sentiment buy/sell windowed counts roughly).
@@ -328,6 +358,10 @@ const main = (): void => {
     ob.reset({ lastUpdateId: 0, bids: [], asks: [], ts: 0 });
     tape.reset();
     sentiment.reset();
+    optionChain.update(null as any);
+    cryptoDashboard.reset();
+    straddleDashboard.reset();
+    expiryCountdown.reset();
     tapeBuys = 0; tapeSells = 0;
     if (tapeBuysEl) tapeBuysEl.textContent = '0';
     if (tapeSellsEl) tapeSellsEl.textContent = '0';
@@ -384,6 +418,7 @@ const main = (): void => {
       },
     ));
     unsubs.push(client.streamTrades(state.provider, state.symbol, (t) => {
+      console.log('Trade received:', t.price, t.qty, t.makerSide);
       updateHeaderPrice(t.price);
       tape.push(t);
       sentiment.push(t);
@@ -405,7 +440,34 @@ const main = (): void => {
       chart.renderVolumeProfile();
       // Analytics stream often carries the latest LTP as well; use as fallback.
       updateHeaderPrice(data.ltp);
-    }));
+      if (data.optionChain) {
+        optionChain.update(data.optionChain);
+        
+        // Mock straddle data updates based on option chain
+        const atmStrike = data.optionChain.atmStrike || 24500;
+        straddleDashboard.update({
+          underlying: state.symbol,
+          strike: atmStrike,
+          callLtp: 150,
+          putLtp: 160,
+          delta: 0.05,
+          gamma: 0.002,
+          theta: -12.5,
+          vega: 80,
+          pnl: 1250
+        });
+
+        // Set expiry dynamically (assume next Thursday)
+        const nextThursday = new Date();
+        nextThursday.setDate(nextThursday.getDate() + (4 + 7 - nextThursday.getDay()) % 7);
+        nextThursday.setHours(15, 30, 0, 0);
+        expiryCountdown.setExpiry(nextThursday.getTime(), 'Weekly');
+      }
+      if (data.cryptoMetrics) {
+        cryptoDashboard.update(data.cryptoMetrics);
+      }
+      }));
+
     unsubs.push(client.streamAISignals(state.provider, state.symbol, (sig) => {
       chart.applyAISignal(sig);
     }));

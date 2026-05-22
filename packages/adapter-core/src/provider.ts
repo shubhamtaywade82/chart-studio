@@ -42,4 +42,7 @@ export interface MarketDataProvider {
   streamDepth(symbol: string, onDelta: (d: DepthDelta) => void): Unsub;
   streamTrades(symbol: string, onTrade: (t: Trade) => void): Unsub;
   streamBookTicker(symbol: string, onTicker: (t: BookTicker) => void): Unsub;
+
+  // ── Options ───────────────────────────────────────────────────────────
+  getOptionChain?(symbol: string): Promise<any>;
 }

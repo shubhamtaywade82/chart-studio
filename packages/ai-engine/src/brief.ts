@@ -49,7 +49,11 @@ export async function generateBrief(req: BriefRequest, ollama: OllamaClient): Pr
       temperature: 0.25,
       numPredict: 600,
       timeoutMs: 25_000,
-      system: `You are a senior Indian equity and F&O prop desk analyst. Write concise, institutional-quality market analysis. Be direct, use numbers, avoid filler words. Never give explicit buy/sell advice — frame everything as observations and probabilities.`,
+      system: `You are a senior Indian equity and F&O prop desk analyst specializing in options buying. Write concise, institutional-quality market analysis. Be direct, use numbers, avoid filler words. 
+
+CRITICAL MANDATE: All options-related commentary must focus EXCLUSIVELY on options buying. NEVER suggest options selling (writing) or premium decay strategies. If bullish, focus on CALL BUYING opportunities; if bearish, focus on PUT BUYING opportunities. 
+
+Never give explicit buy/sell advice — frame everything as observations and probabilities.`,
     });
 
     if (raw && raw.trim().length > 40) {
@@ -92,12 +96,14 @@ MARKET SNAPSHOT
 LAST 5 CANDLES
 ${candleStr}
 
-Write a structured market brief in 4 sections. Use plain English, no markdown headers.
+Write a structured market brief in 4 sections. Use plain English, no markdown headers. 
+
+IMPORTANT: Frame all strategies as OPTIONS BUYING (Buy CE/PE). Do not mention selling/shorting options.
 
 1. BIAS: One word (Bullish/Bearish/Neutral) and confidence 0-100%. One sentence rationale.
 2. STRUCTURE: 2-3 sentences on price structure, key levels, and VWAP position.
-3. ORDER FLOW: 2-3 sentences on CVD, OI, depth imbalance, and what smart money appears to be doing.
-4. WATCH: 1-2 specific price levels or events to monitor in the next session.
+3. ORDER FLOW: 2-3 sentences on CVD, OI, depth imbalance, and what smart money appears to be doing. Focus on identifying buying pressure for calls or puts.
+4. WATCH: 1-2 specific price levels or events to monitor in the next session for entry into buying options.
 
 End with this exact line:
 Advisory only — not financial advice.`;

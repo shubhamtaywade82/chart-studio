@@ -10,6 +10,9 @@ import { VectorStore } from './vector-store';
 import { CorrelationTracker } from './correlation';
 import { computeStrategySignal, type StrategySignalCandle } from './strategy-signal';
 
+import { morningBrief } from './morning-brief';
+import type { MorningContext } from './morning-brief';
+
 interface SymbolState {
   derived: DerivedState;
   candles: MicrostructureSnapshot['candles'];
@@ -31,6 +34,7 @@ export class PropDeskAI {
   private readonly vectors: VectorStore;
   private readonly correlation = new CorrelationTracker();
   private readonly states = new Map<string, SymbolState>(); // key = provider:symbol
+  private macroState: MorningContext = {};
   /** provider:symbol:interval -> bars (cap 500) */
   private readonly candleCache = new Map<string, StrategySignalCandle[]>();
   /** key -> last publish ts */
@@ -43,6 +47,33 @@ export class PropDeskAI {
     this.vectors = new VectorStore(this.pub, this.ollama);
   }
 
+  private lastMorningBriefTs = 0;
+
+  private async maybeGenerateMorningBrief(): Promise<void> {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const isMorning = now.getHours() >= 8 && now.getHours() <= 11; // 8 AM to 11 AM IST roughly
+    
+    // For now, let's generate it once per hour if in morning window, or once a day otherwise.
+    const interval = isMorning ? 3600_000 : 86400_000;
+    
+    if (Date.now() - this.lastMorningBriefTs > interval) {
+      this.lastMorningBriefTs = Date.now();
+      try {
+        const brief = await morningBrief(this.macroState, this.ollama);
+        if (brief) {
+          await this.pub.publish('chart.ai.morning_brief', JSON.stringify({
+            kind: 'morning_brief',
+            ts: Date.now(),
+            data: brief
+          }));
+        }
+      } catch (err) {
+        console.error('[ai-engine] morning brief generation failed', err);
+      }
+    }
+  }
+
   async start(): Promise<void> {
     this.sub.on('pmessage', (_pattern, channel, raw) => {
       try {
@@ -53,10 +84,15 @@ export class PropDeskAI {
         } else if (channel.includes('.candle.')) {
           const env = JSON.parse(raw) as DataEnvelope<unknown>;
           this.onCandle(env);
+        } else if (channel === 'chart.macro.snapshot') {
+          const snap = JSON.parse(raw);
+          this.macroState = { ...this.macroState, ...snap };
+          // If this is the first macro data today, or on major shift, trigger brief.
+          void this.maybeGenerateMorningBrief();
         }
       } catch { /* ignore malformed */ }
     });
-    await this.sub.psubscribe('chart.data.*.analytics', 'chart.data.*.candle.*');
+    await this.sub.psubscribe('chart.data.*.analytics', 'chart.data.*.candle.*', 'chart.macro.snapshot');
 
     // Periodic correlation broadcast.
     setInterval(() => this.publishCorrelations(), 5_000);
@@ -116,9 +152,13 @@ export class PropDeskAI {
         prevOi: data.prevOi ?? 0,
         bids: data.depthBids ?? [],
         asks: data.depthAsks ?? [],
+        fundingRate: (data as any).cryptoMetrics?.fundingRate,
+        longShortRatio: (data as any).cryptoMetrics?.longShortRatio,
+        basisPct: (data as any).cryptoMetrics?.basisPct,
       },
       derived: { vwapDeviation: 0, cvd: 0, oiChange: 0, depthImbalance: 0, tradeIntensity: 0, volatilityRegime: 'normal', toxicity: 0 },
     };
+
     snap.derived = state.derived.computeDerived(snap.tick, state.candles);
 
     // Track for correlation.

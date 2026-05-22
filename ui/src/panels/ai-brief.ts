@@ -36,6 +36,74 @@ export class AIBriefPanel {
     this.body = document.getElementById('ai-brief-body')!;
     this.statusEl = document.getElementById('ai-brief-status');
     this.setStatus('idle');
+
+    document.getElementById('ai-test-conn')?.addEventListener('click', () => {
+      void this.runDiagnostic();
+    });
+  }
+
+  private async runDiagnostic(): Promise<void> {
+    this.renderSkeleton();
+    this.setStatus('loading');
+    
+    try {
+      const res = await fetch('/api/ai/health');
+      const data = await res.json();
+      
+      if (data.status === 'ok') {
+        const modelsHtml = data.required.map((r: any) => `
+          <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
+            <span>${r.id}</span>
+            <span style="color: ${r.available ? '#00e676' : '#f6465d'}">${r.available ? 'AVAILABLE' : 'MISSING'}</span>
+          </div>
+        `).join('');
+
+        this.body.innerHTML = `
+          <div class="ai-brief-header" style="background: rgba(0,230,118,0.1); border-radius: 4px; padding: 10px;">
+            <div style="font-weight: bold; color: #00e676;">✅ Connection Successful</div>
+            <div class="mono-sm dim">${data.host}</div>
+          </div>
+          <div style="padding: 12px 4px;">
+            <div class="mb-section-title">Required Models</div>
+            <div style="margin-top: 8px;">${modelsHtml}</div>
+            
+            <div class="mb-section-title" style="margin-top: 16px;">All Local Models</div>
+            <div class="mono-sm dim" style="margin-top: 8px; font-size: 9px; line-height: 1.4;">
+              ${data.models.join(', ') || 'None found'}
+            </div>
+            
+            <div style="margin-top: 20px; font-size: 10px; color: var(--text-dim);">
+              Note: If required models are missing, run: <br>
+              <code>ollama pull llama3.1:8b</code><br>
+              <code>ollama pull llama3.2:3b</code>
+            </div>
+          </div>
+          <button class="ai-brief-refresh-btn" onclick="location.reload()">Return to Brief</button>
+        `;
+        this.setStatus('live');
+      } else {
+        this.body.innerHTML = `
+          <div class="ai-brief-header" style="background: rgba(246,70,93,0.1); border-radius: 4px; padding: 10px;">
+            <div style="font-weight: bold; color: #f6465d;">❌ Connection Failed</div>
+            <div class="mono-sm dim">${data.host}</div>
+          </div>
+          <div style="padding: 12px 4px; font-size: 11px;">
+            <p>Error: <strong>${data.error}</strong></p>
+            <p style="margin-top: 12px; color: var(--text-secondary);">Possible solutions:</p>
+            <ul style="margin-top: 8px; padding-left: 16px;">
+              <li>Check if Ollama is running (<code>ollama serve</code>)</li>
+              <li>Verify OLLAMA_HOST in your <code>.env</code></li>
+              <li>If using Docker on Linux, use your Host IP instead of localhost</li>
+              <li>Ensure OLLAMA_API_KEY is correct if using a cloud provider</li>
+            </ul>
+          </div>
+          <button class="ai-brief-refresh-btn" onclick="location.reload()">Retry</button>
+        `;
+        this.setStatus('error');
+      }
+    } catch (err) {
+      this.renderError('Diagnostic failed: ' + String(err));
+    }
   }
 
   /** Call when symbol/provider/interval changes. Triggers an immediate fetch. */
