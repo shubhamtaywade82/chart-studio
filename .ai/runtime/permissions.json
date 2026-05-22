@@ -1,0 +1,5 @@
+# Permissions
+
+- **File System**: Read/Write access to all files except `.env`.
+- **Shell**: Allowed to run `npm`, `tsc`, `git`.
+- **Network**: Allowed to fetch documentation and exchange API schemas.

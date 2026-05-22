@@ -82,8 +82,10 @@ const intervalToMinutes = (interval: string): number | 'daily' => {
   return 60;
 };
 
-const formatDate = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
-const formatDateTime = (ms: number): string => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+const formatDate = (ms: number): string => new Date(ms + IST_OFFSET).toISOString().slice(0, 10);
+const formatDateTime = (ms: number): string => new Date(ms + IST_OFFSET).toISOString().slice(0, 19).replace('T', ' ');
+
 
 export const fetchCandles = async (
   client: AxiosInstance,
