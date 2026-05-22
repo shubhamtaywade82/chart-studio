@@ -294,13 +294,30 @@ export class ChartView {
     }
   }
 
-  setHistory(candles: Candle[]): void {
-    this.candles = [...candles].sort((a, b) => a.openTime - b.openTime);
-    this.ltpAnimator.reset();
-    this.lastUpdatedTime = this.candles.length > 0
-      ? (Math.floor(this.candles[this.candles.length - 1]!.openTime / 1000) as UTCTimestamp)
-      : null;
+  setHistory(history: Candle[]): void {
+    if (history.length === 0) {
+      this.candles = [];
+      this.series.setData([]);
+      this.volume.setData([]);
+      this.lastUpdatedTime = null;
+      return;
+    }
 
+    // Merge history with existing candles to avoid losing recent live updates
+    // if the history snapshot is slightly stale (common with CDN/cache delays).
+    const map = new Map<number, Candle>();
+    for (const c of this.candles) map.set(c.openTime, c);
+    for (const c of history) map.set(c.openTime, c);
+
+    this.candles = Array.from(map.values()).sort((a, b) => a.openTime - b.openTime);
+    
+    this.ltpAnimator.reset();
+    const last = this.candles[this.candles.length - 1];
+    if (last) {
+      this.lastUpdatedTime = Math.floor(last.openTime / 1000) as UTCTimestamp;
+    }
+
+    // Auto-detect precision based on first few candles
     let precision = 2;
     if (this.candles.length > 0) {
       const sample = this.candles[0]!.close.toString();
@@ -328,16 +345,13 @@ export class ChartView {
       value: c.volume,
       color: c.close >= c.open ? (this.theme.volumeUp ?? 'rgba(46, 189, 133, 0.35)') : (this.theme.volumeDown ?? 'rgba(246, 70, 93, 0.35)'),
     }));
+    
     this.series.setData(cs);
     this.volume.setData(vs);
 
-    // New symbol can have a wildly different price magnitude (BTC ~$77k vs
-    // XRP ~$1.3). Force the price scale to re-auto-fit instead of inheriting
-    // the previous symbol's range.
+    // Ensure price scale fits the new data
     this._api.priceScale('right').applyOptions({ autoScale: true });
-    this._api.timeScale().fitContent();
-
-    const last = this.candles[this.candles.length - 1];
+    
     if (last) this.setLastTradePrice(last.close);
 
     for (const smc of this.smcPrimitives) {
@@ -365,10 +379,13 @@ export class ChartView {
 
   updateCandle(c: Candle): void {
     const t = Math.floor(c.openTime / 1000) as UTCTimestamp;
-    const isNewBar = !this.lastUpdatedTime || t > this.lastUpdatedTime;
+    
+    // Always update internal state.
+    this.updateCandleState(c);
 
-    if (isNewBar) {
-      this.ltpAnimator.flush();
+    // Lightweight charts: update() can only add a new bar or update the LATEST one.
+    // If t < lastUpdatedTime, it's an out-of-order update (e.g. sealed bar arrived late).
+    if (!this.lastUpdatedTime || t >= this.lastUpdatedTime) {
       try {
         this.series.update({ time: t, open: c.open, high: c.high, low: c.low, close: c.close });
         this.volume.update({
@@ -378,24 +395,39 @@ export class ChartView {
         });
         this.lastUpdatedTime = t;
       } catch (e) {
-        console.warn('[chart] failed to update new bar', e);
+        console.warn('[chart] failed to update bar', e);
       }
+    } else {
+      // Historical or late update: refresh entire series to show the finalized previous bar.
+      this.refreshChartData();
     }
 
-    this.updateCandleState(c);
-
-    // If it's the current (latest) bar, drive visual smoothness via animator.
-    // Otherwise, it was a historical update; we already called series.update if needed.
+    // Visual smoothness for the live bar.
     const last = this.candles[this.candles.length - 1];
     if (last && c.openTime === last.openTime) {
       this.ltpAnimator.snapTo(c.close);
-      // Force an update to draw any new high/low/volume updates immediately.
       this.onSmoothPriceUpdate(this.ltpAnimator.getPrice() || c.close);
     }
 
     for (const smc of this.smcPrimitives) {
       smc.setCandles(this.candles);
     }
+  }
+
+  private refreshChartData(): void {
+    const cs = this.candles.map((c) => ({
+      time: Math.floor(c.openTime / 1000) as UTCTimestamp,
+      open: c.open, high: c.high, low: c.low, close: c.close,
+    }));
+    const vs = this.candles.map((c) => ({
+      time: Math.floor(c.openTime / 1000) as UTCTimestamp,
+      value: c.volume,
+      color: c.close >= c.open ? (this.theme.volumeUp ?? 'rgba(46, 189, 133, 0.35)') : (this.theme.volumeDown ?? 'rgba(246, 70, 93, 0.35)'),
+    }));
+    this.series.setData(cs);
+    this.volume.setData(vs);
+    const last = cs[cs.length - 1];
+    if (last) this.lastUpdatedTime = last.time;
   }
 
   setLastTradePrice(price: number, timestampMs?: number, qty?: number): void {

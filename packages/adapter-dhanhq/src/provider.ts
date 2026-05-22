@@ -338,16 +338,27 @@ export class DhanProvider implements MarketDataProvider {
         ) {
           return;
         }
+        // Infer trade quantity from volume delta if ltq is missing/zero
+        let qty = tick.ltq ?? 0;
+        if (!qty && tick.volume !== undefined && lastVol !== undefined && tick.volume > lastVol) {
+          qty = tick.volume - lastVol;
+        }
+
+        // Infer side from tick direction (downtick = sell = makerSide true)
+        const isSell = lastLtp !== undefined && tick.ltp < lastLtp;
+
         lastLtt = tick.ltt;
         lastLtp = tick.ltp;
         if (tick.volume !== undefined) lastVol = tick.volume;
 
-        onTrade({
-          price: tick.ltp,
-          qty: tick.ltq ?? 0,
-          ts: tick.ltt ? tick.ltt * 1000 : tick.ts,
-          makerSide: false,
-        });
+        if (qty > 0) {
+          onTrade({
+            price: tick.ltp,
+            qty: qty,
+            ts: tick.ltt ? tick.ltt * 1000 : tick.ts,
+            makerSide: isSell,
+          });
+        }
       },
     ));
   }
