@@ -6,6 +6,7 @@ import { ClientSession } from './ws-router';
 import { federatedListSymbols, federatedSearchSymbols } from './search';
 import { handleBriefRequest, cacheAnalytics, cacheCandle, cacheMorningBrief, getMorningBrief } from './brief';
 import { fetchMacroSnapshot } from './macro';
+import { MarginCalculator, PortfolioGreeksEngine, VarEngine } from '@chart-studio/ai-engine';
 import type { DataEnvelope } from '@chart-studio/adapter-core';
 
 import pino from 'pino';
@@ -97,6 +98,10 @@ const main = async (): Promise<void> => {
     }
   }, 60_000); // Every 60s
   
+  const marginCalc = new MarginCalculator();
+  const greeksEngine = new PortfolioGreeksEngine();
+  const varEngine = new VarEngine();
+
   const server = http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', ORIGIN);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -189,6 +194,85 @@ const main = async (): Promise<void> => {
       }).catch(err => {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: String(err) }));
+      });
+      return;
+    }
+
+    if (url.pathname === '/ai/health') {
+      const ollamaHost = (process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/$/, '');
+      const apiKey = process.env.OLLAMA_API_KEY;
+      
+      const check = async () => {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+        // 1. Check basic connectivity (version)
+        const vRes = await fetch(`${ollamaHost}/api/tags`, { headers }).catch(e => { throw new Error(`Cannot reach Ollama at ${ollamaHost}: ${e.message}`); });
+        if (!vRes.ok) throw new Error(`Ollama host returned error ${vRes.status}`);
+        
+        const tags = await vRes.json() as any;
+        const models = (tags.models || []).map((m: any) => m.name);
+        
+        return {
+          status: 'ok',
+          host: ollamaHost,
+          usingApiKey: !!apiKey,
+          models,
+          required: [
+            { id: 'llama3.1:8b', available: models.some((m: string) => m.startsWith('llama3.1')) },
+            { id: 'llama3.2:3b', available: models.some((m: string) => m.startsWith('llama3.2')) }
+          ]
+        };
+      };
+
+      check().then(result => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      }).catch(err => {
+        res.writeHead(200, { 'Content-Type': 'application/json' }); // Still 200 so UI can parse the error JSON
+        res.end(JSON.stringify({ status: 'error', error: err.message, host: ollamaHost }));
+      });
+      return;
+    }
+
+    if (url.pathname === '/risk') {
+      const symbol = url.searchParams.get('symbol') ?? 'NIFTY';
+      const samplePositions = [
+        { 
+          symbol, 
+          exchangeSegment: 'NSE_FNO', 
+          qty: 50, 
+          ltp: 24500, 
+          isOption: false,
+          lotSize: 50,
+          delta: 1, gamma: 0, vega: 0, theta: 0, pnl: 1250 
+        }
+      ];
+
+      const runRisk = async () => {
+        const margin = await marginCalc.calculate(samplePositions as any);
+        const greeks = greeksEngine.aggregate(samplePositions as any, 24500);
+        const varRes = varEngine.calculate(samplePositions.map(p => ({
+          symbol: p.symbol,
+          qty: p.qty,
+          ltp: p.ltp,
+          volatility: 0.18
+        })));
+
+        return {
+          ...margin,
+          ...greeks,
+          var95: varRes.var95,
+          positions: samplePositions
+        };
+      };
+
+      runRisk().then(result => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      }).catch(err => {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
       });
       return;
     }

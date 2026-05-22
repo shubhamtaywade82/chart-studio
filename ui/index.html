@@ -252,6 +252,22 @@
                   <div class="sig-row"><div class="sig-label">CHoCH</div><div id="sig-choch" class="sig-value">—</div></div>
                   <div class="sig-section-header">MTF Stack</div>
                   <div class="sig-row"><div class="sig-label">Direction</div><div id="sig-mtf-dir" class="sig-value">—</div></div>
+              <!-- Risk & Margin Engine (Week 2) --> 
+              <div class="panel sidebar-inner-panel"> 
+                <div class="panel-header"> 
+                  <h2 class="panel-title">Margin Utilization</h2> 
+                  <span class="mono-sm dim">Live Risk</span> 
+                </div> 
+                <div id="margin-gauge-panel"></div> 
+              </div> 
+
+              <div class="panel sidebar-inner-panel"> 
+                <div class="panel-header"> 
+                  <h2 class="panel-title">Portfolio Greeks</h2> 
+                  <span class="mono-sm dim">Delta Neutral</span> 
+                </div> 
+                <div id="greeks-panel" class="greeks-panel-host"></div> 
+              </div>
                   <div class="sig-row"><div class="sig-label">Pass</div><div id="sig-mtf-pass" class="sig-value">—</div></div>
                   <div id="sig-mtf-reasons" class="reasons-list"></div>
                   <div class="sig-section-header">Trend Matrix</div>
@@ -268,10 +284,16 @@
               <div class="panel sidebar-inner-panel" id="ai-brief-panel">
                 <div class="panel-header">
                   <h2 class="panel-title">AI Brief & Trade Cards</h2>
-                  <span id="ai-brief-status" class="mono-sm dim">offline</span>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <button id="ai-test-conn" class="btn-icon-sm" title="Test AI Connection">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    </button>
+                    <span id="ai-brief-status" class="status-badge">offline</span>
+                  </div>
                 </div>
-                <div id="ai-brief-body" class="ai-brief-body">
-                </div>
+                <div id="ai-brief-body" class="ai-brief-body"></div>
+              </div>
+
                 <div id="ai-trade-card-host" style="margin-top: 10px;"></div>
               </div>
             </div>

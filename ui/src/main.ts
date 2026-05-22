@@ -89,9 +89,18 @@ const main = (): void => {
   const smartSignals = new SmartSignalsPanel();
   const morningBriefPanel = new MorningBriefPanel();
   const optionChain = new OptionChainPanel(document.getElementById('option-chain-panel')!);
-  const greeksPanel = new GreeksPanel(document.getElementById('greeks-panel-container')!);
-  const marginGauge = new MarginGauge(document.getElementById('margin-gauge-panel')!);
   const aiTradeCard = new AiTradeCard(document.getElementById('ai-trade-card-host')!);
+  const greeksPanel = new GreeksPanel(document.getElementById('greeks-panel')!);
+  const marginGauge = new MarginGauge(document.getElementById('margin-gauge-panel')!, () => {
+    fetch(`/api/risk?symbol=${activeState?.symbol || 'NIFTY'}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && !data.error) {
+          marginGauge.update(data);
+          greeksPanel.update(data);
+        }
+      });
+  });
   const ivSkewPanel = new IVSkewPrimitive(document.getElementById('iv-skew-panel')!);
   const cryptoDashboard = new CryptoDashboard(document.getElementById('crypto-dashboard-host')!);
   const straddleDashboard = new StraddleDashboard(document.getElementById('straddle-dashboard-host')!);

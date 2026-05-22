@@ -1,15 +1,9 @@
-/**
- * Thin wrapper around the Ollama HTTP API. Centralizes timeout, JSON-mode
- * parsing, retry-with-backoff, and a circuit breaker so a downed Ollama
- * server can't stall the engine.
- *
- * If `OLLAMA_DISABLE=1` or the host is unreachable, all calls return null
- * — heuristic-only mode keeps working.
- */
+import { Ollama } from 'ollama';
+
 export interface OllamaGenerateOptions {
   model: string;
   prompt: string;
-  /** Force JSON output (Ollama "format" parameter). */
+  /** Force JSON output. */
   json?: boolean;
   /** Truncate output to N tokens. */
   numPredict?: number;
@@ -28,20 +22,21 @@ export interface OllamaEmbeddingOptions {
 }
 
 export class OllamaClient {
-  private host: string;
+  private client: Ollama;
   private disabled: boolean;
   private failureCount = 0;
   private circuitOpenUntil = 0;
 
-  private apiKey?: string;
-
   constructor() {
-    const mode = process.env.OLLAMA_MODE === 'cloud' ? 'cloud' : 'local';
-    const cloudHost = process.env.OLLAMA_CLOUD_HOST || 'https://your-custom-ollama-server.com';
-    this.host = mode === 'cloud' ? cloudHost : 'http://localhost:11434';
-    this.host = this.host.replace(/\/$/, '');
+    const host = (process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/$/, '');
+    const apiKey = process.env.OLLAMA_API_KEY;
+    
+    this.client = new Ollama({
+      host,
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
+    });
+    
     this.disabled = process.env.OLLAMA_DISABLE === '1';
-    this.apiKey = process.env.OLLAMA_API_KEY;
   }
 
   isAvailable(): boolean {
@@ -52,40 +47,26 @@ export class OllamaClient {
 
   async generate(opts: OllamaGenerateOptions): Promise<string | null> {
     if (!this.isAvailable()) return null;
-    const body: Record<string, unknown> = {
-      model: opts.model,
-      prompt: opts.prompt,
-      stream: false,
-      options: {
-        temperature: opts.temperature ?? 0.05,
-        num_predict: opts.numPredict ?? 512,
-        num_ctx: 4096,
-      },
-    };
-    if (opts.json) body.format = 'json';
-    if (opts.system) body.system = opts.system;
 
-    const headers: Record<string, string> = { 'content-type': 'application/json' };
-    if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
-
-    const ctrl = new AbortController();
-    const tid = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 20_000);
     try {
-      const res = await fetch(`${this.host}/api/generate`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        signal: ctrl.signal,
+      const res = await this.client.generate({
+        model: opts.model,
+        prompt: opts.prompt,
+        system: opts.system,
+        stream: false,
+        format: opts.json ? 'json' : undefined,
+        options: {
+          temperature: opts.temperature ?? 0.05,
+          num_predict: opts.numPredict ?? 512,
+          num_ctx: 4096,
+        },
       });
-      if (!res.ok) throw new Error(`ollama generate ${res.status}`);
-      const json = await res.json() as { response?: string };
+      
       this.failureCount = 0;
-      return json.response ?? null;
+      return res.response || null;
     } catch (err) {
       this.recordFailure(err);
       return null;
-    } finally {
-      clearTimeout(tid);
     }
   }
 
@@ -104,27 +85,18 @@ export class OllamaClient {
 
   async embed(opts: OllamaEmbeddingOptions): Promise<number[] | null> {
     if (!this.isAvailable()) return null;
-    const headers: Record<string, string> = { 'content-type': 'application/json' };
-    if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
 
-    const ctrl = new AbortController();
-    const tid = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 10_000);
     try {
-      const res = await fetch(`${this.host}/api/embeddings`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ model: opts.model, prompt: opts.prompt }),
-        signal: ctrl.signal,
+      const res = await this.client.embeddings({
+        model: opts.model,
+        prompt: opts.prompt,
       });
-      if (!res.ok) throw new Error(`ollama embed ${res.status}`);
-      const json = await res.json() as { embedding?: number[] };
+      
       this.failureCount = 0;
-      return json.embedding ?? null;
+      return res.embedding ?? null;
     } catch (err) {
       this.recordFailure(err);
       return null;
-    } finally {
-      clearTimeout(tid);
     }
   }
 

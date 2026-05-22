@@ -113,11 +113,19 @@ function getMultiTimeframeCandles(provider: string, symbol: string): Record<stri
   return result;
 }
 
-// ── Ollama Client (inline, no dep) ────────────────────────────────────────────
+// ── Ollama Client (Unified) ──────────────────────────────────────────────────
+
+import { Ollama } from 'ollama';
 
 const OLLAMA_HOST = (process.env.OLLAMA_HOST ?? 'http://localhost:11434').replace(/\/$/, '');
 const OLLAMA_DISABLE = process.env.OLLAMA_DISABLE === '1';
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY;
 const BRIEF_MODEL = process.env.AI_NARRATIVE_MODEL ?? 'llama3.2:3b';
+
+const ollamaClient = new Ollama({
+  host: OLLAMA_HOST,
+  headers: OLLAMA_API_KEY ? { Authorization: `Bearer ${OLLAMA_API_KEY}` } : undefined,
+});
 
 let ollamaFailures = 0;
 let ollamaCircuitUntil = 0;
@@ -130,25 +138,18 @@ function ollamaAvailable(): boolean {
 
 async function ollamaGenerate(prompt: string, system: string): Promise<string | null> {
   if (!ollamaAvailable()) return null;
-  const ctrl = new AbortController();
-  const tid = setTimeout(() => ctrl.abort(), 25_000);
+
   try {
-    const res = await fetch(`${OLLAMA_HOST}/api/generate`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: BRIEF_MODEL,
-        prompt,
-        system,
-        stream: false,
-        options: { temperature: 0.25, num_predict: 600, num_ctx: 4096 },
-      }),
-      signal: ctrl.signal,
+    const res = await ollamaClient.generate({
+      model: BRIEF_MODEL,
+      prompt,
+      system,
+      stream: false,
+      options: { temperature: 0.25, num_predict: 600, num_ctx: 4096 },
     });
-    if (!res.ok) throw new Error(`ollama ${res.status}`);
-    const json = await res.json() as { response?: string };
+    
     ollamaFailures = 0;
-    return json.response ?? null;
+    return res.response || null;
   } catch (err) {
     ollamaFailures += 1;
     if (ollamaFailures >= 3) {
@@ -157,8 +158,6 @@ async function ollamaGenerate(prompt: string, system: string): Promise<string | 
       console.warn('[gateway/brief] ollama circuit opened for 30s:', err instanceof Error ? err.message : err);
     }
     return null;
-  } finally {
-    clearTimeout(tid);
   }
 }
 
