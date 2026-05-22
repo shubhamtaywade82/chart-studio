@@ -119,9 +119,35 @@ export class DhanProvider implements MarketDataProvider {
     const items = await fetchOptionChain(this.client, ins);
     const maxPain = calculateMaxPain(items);
 
-    // Greeks calculation: we need DTE (T) and risk-free rate.
-    // Assuming RBI repo 6.5%.
-    const greeks = new GreeksEngine();
+    // Greeks calculation: we need DTE (T)
+    // Find an option for this underlying to get near-month expiry
+    const options = this.instrumentCache.filter(i => i.symbolName.startsWith(ins.symbolName) && (i.instrumentType.startsWith('OPT') || i.instrumentType === 'OP'));
+    const nearExpiry = options.length > 0 ? options[0]?.expiryDate : undefined;
+    
+    let T = 7 / 365; // Default 1 week
+    if (nearExpiry) {
+      const expiryTs = Date.parse(nearExpiry);
+      const now = Date.now();
+      T = Math.max(0.5, (expiryTs - now) / (1000 * 60 * 60 * 24)) / 365;
+    }
+
+    const engine = new GreeksEngine();
+    const strikesWithGreeks = items.map(item => {
+      const callGreeks = engine.calculate(S, item.strikePrice, T, item.callIV || 0.15, true);
+      const putGreeks = engine.calculate(S, item.strikePrice, T, item.putIV || 0.15, false);
+      
+      return {
+        ...item,
+        callDelta: callGreeks.delta,
+        callGamma: callGreeks.gamma,
+        callTheta: callGreeks.theta,
+        callVega: callGreeks.vega,
+        putDelta: putGreeks.delta,
+        putGamma: putGreeks.gamma,
+        putTheta: putGreeks.theta,
+        putVega: putGreeks.vega,
+      };
+    });
 
     // Calculate S/R based on highest OI
     let supportOI = 0;
@@ -143,7 +169,7 @@ export class DhanProvider implements MarketDataProvider {
     return {
       underlying: symbol,
       timestamp: Date.now(),
-      strikes: items,
+      strikes: strikesWithGreeks,
       maxPain,
       supportOI,
       resistanceOI,

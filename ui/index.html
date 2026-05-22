@@ -128,6 +128,7 @@
           <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="alerts">Alerts</button>
           <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="scripts">Scripts</button>
           <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="smart-signals">Smart Money</button>
+          <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-tab="risk">Risk</button>
         </nav>
         <div class="sidebar-tab-panels">
           <!-- Live: Sentiment + Microstructure + Order Book -->
@@ -168,7 +169,7 @@
                 <div class="book-mark-block">
                   <div id="book-mark-val" class="book-mark-val is-empty">—</div>
                   <div class="book-mark-sub">
-                    <span>Mid price</span>
+                    <span>Spread</span>
                     <span id="ob-spread" class="book-spread-inline"></span>
                   </div>
                 </div>
@@ -201,6 +202,12 @@
                 <span class="mono-sm dim">Live Greeks</span>
               </div>
               <div id="option-chain-panel" class="option-chain-panel"></div>
+            </div>
+            <div class="panel sidebar-inner-panel" style="margin-top: 10px;">
+              <div class="panel-header">
+                <h2 class="panel-title">IV Skew (Smile)</h2>
+              </div>
+              <div id="iv-skew-panel" style="height: 200px;"></div>
             </div>
           </div>
 
@@ -241,12 +248,12 @@
               </div>
               <div class="panel sidebar-inner-panel" id="ai-brief-panel">
                 <div class="panel-header">
-                  <h2 class="panel-title">AI Brief</h2>
+                  <h2 class="panel-title">AI Brief & Trade Cards</h2>
                   <span id="ai-brief-status" class="mono-sm dim">offline</span>
                 </div>
                 <div id="ai-brief-body" class="ai-brief-body">
                 </div>
-
+                <div id="ai-trade-card-host" style="margin-top: 10px;"></div>
               </div>
             </div>
           </div>
@@ -294,6 +301,24 @@
                 <div id="smart-signals-list" class="smart-signals-list">
                   <div class="loading-state">Loading signals...</div>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Risk -->
+          <div class="sidebar-tab-pane" role="tabpanel" data-tab-pane="risk" aria-hidden="true">
+            <div class="sidebar-risk-stack" style="display:flex; flex-direction:column; gap:10px;">
+              <div class="panel sidebar-inner-panel">
+                <div class="panel-header">
+                  <h2 class="panel-title">Margin & VaR</h2>
+                </div>
+                <div id="margin-gauge-panel"></div>
+              </div>
+              <div class="panel sidebar-inner-panel">
+                <div class="panel-header">
+                  <h2 class="panel-title">Portfolio Greeks</h2>
+                </div>
+                <div id="greeks-panel-container"></div>
               </div>
             </div>
           </div>

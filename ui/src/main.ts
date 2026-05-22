@@ -17,6 +17,10 @@ import { AIBriefPanel } from './panels/ai-brief';
 import { StrategySignalsPanel } from './panels/strategy-signals';
 import { SmartSignalsPanel } from './panels/smart-signals';
 import { OptionChainPanel } from './panels/option-chain';
+import { GreeksPanel } from './panels/greeks-panel';
+import { MarginGauge } from './panels/margin-gauge';
+import { AiTradeCard } from './panels/ai-trade-card';
+import { IVSkewPrimitive } from './chart/iv-skew-primitive';
 
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
@@ -80,6 +84,12 @@ const main = (): void => {
   const strategySignals = new StrategySignalsPanel(client);
   const smartSignals = new SmartSignalsPanel();
   const optionChain = new OptionChainPanel(document.getElementById('option-chain-panel')!);
+  const greeksPanel = new GreeksPanel(document.getElementById('greeks-panel-container')!);
+  const marginGauge = new MarginGauge(document.getElementById('margin-gauge-panel')!);
+  const aiTradeCard = new AiTradeCard(document.getElementById('ai-trade-card-host')!);
+  const ivSkewPanel = new IVSkewPrimitive(document.getElementById('iv-skew-panel')!);
+
+
 
   let activeState: AppState | null = parseHash();
 

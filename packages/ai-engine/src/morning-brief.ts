@@ -25,12 +25,14 @@ export interface MorningBriefOutput {
 }
 
 export async function morningBrief(ctx: MorningContext, ollama: OllamaClient): Promise<MorningBriefOutput | null> {
-  const prompt = `You are the head of prop desk at a Mumbai HFT firm.
+  const prompt = `You are the head of prop desk at a Mumbai HFT firm specializing in options buying strategies.
 Pre-market data:
 - Global: S&P 500 ${ctx.spxChange ?? '?'}%, NDX ${ctx.ndxChange ?? '?'}%, VIX ${ctx.vix ?? '?'}
 - India: USD/INR ${ctx.usdinr ?? '?'}, crude ${ctx.brent ?? '?'}, 10Y yield ${ctx.yield10y ?? '?'}
 - F&O: Max pain ${ctx.maxPain ?? '?'}, PCR ${ctx.pcr ?? '?'}, FIIs net ${ctx.fiiNetCr ?? '?'}cr
 - Top OI adds: ${ctx.topOiAdds?.join(', ') ?? '?'}
+
+CRITICAL MANDATE: All scenarios and recommendations must be for OPTIONS BUYING (Buying Calls or Puts). Do not suggest selling/writing options.
 
 Output JSON ONLY:
 {

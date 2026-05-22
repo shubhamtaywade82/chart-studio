@@ -111,6 +111,72 @@ export const CANDLE_THEMES: CandleTheme[] = [
     },
     volumeUp: 'rgba(33,150,243,0.35)', volumeDown: 'rgba(244,67,54,0.35)',
   },
+  {
+    id: 'hollow-classic',
+    label: 'Hollow Classic',
+    options: {
+      upColor: 'transparent', downColor: 'transparent',
+      borderUpColor: '#00e676', borderDownColor: '#ff1744',
+      wickUpColor: '#00e676', wickDownColor: '#ff1744',
+      borderVisible: true, wickVisible: true,
+    },
+    volumeUp: 'rgba(0,230,118,0.3)', volumeDown: 'rgba(255,23,68,0.3)',
+  },
+  {
+    id: 'hollow-dark',
+    label: 'Hollow Dark',
+    options: {
+      upColor: 'transparent', downColor: 'transparent',
+      borderUpColor: '#cfd8dc', borderDownColor: '#546e7a',
+      wickUpColor: '#cfd8dc', wickDownColor: '#546e7a',
+      borderVisible: true, wickVisible: true,
+    },
+    volumeUp: 'rgba(207,216,220,0.3)', volumeDown: 'rgba(84,110,122,0.3)',
+  },
+  {
+    id: 'colorblind-hc',
+    label: 'Colorblind (HC Yellow/Blue)',
+    options: {
+      upColor: '#FFD600', downColor: '#2962FF',
+      borderUpColor: '#FFD600', borderDownColor: '#2962FF',
+      wickUpColor: '#FFD600', wickDownColor: '#2962FF',
+      borderVisible: true, wickVisible: true,
+    },
+    volumeUp: 'rgba(255,214,0,0,35)', volumeDown: 'rgba(41,98,255,0.35)',
+  },
+  {
+    id: 'colorblind-deuteranopia',
+    label: 'Colorblind (Deuteranopia)',
+    options: {
+      upColor: '#0072B2', downColor: '#D55E00',
+      borderUpColor: '#0072B2', borderDownColor: '#D55E00',
+      wickUpColor: '#0072B2', wickDownColor: '#D55E00',
+      borderVisible: true, wickVisible: true,
+    },
+    volumeUp: 'rgba(0,114,178,0.4)', volumeDown: 'rgba(213,94,0,0.4)',
+  },
+  {
+    id: 'colorblind-tritanopia',
+    label: 'Colorblind (Tritanopia)',
+    options: {
+      upColor: '#009E73', downColor: '#CC79A7',
+      borderUpColor: '#009E73', borderDownColor: '#CC79A7',
+      wickUpColor: '#009E73', wickDownColor: '#CC79A7',
+      borderVisible: true, wickVisible: true,
+    },
+    volumeUp: 'rgba(0,158,115,0.4)', volumeDown: 'rgba(204,121,167,0.4)',
+  },
+  {
+    id: 'hollow-mixed',
+    label: 'Hollow Mixed',
+    options: {
+      upColor: 'transparent', downColor: '#ff1744',
+      borderUpColor: '#00e676', borderDownColor: '#ff1744',
+      wickUpColor: '#00e676', wickDownColor: '#ff1744',
+      borderVisible: true, wickVisible: true,
+    },
+    volumeUp: 'rgba(0,230,118,0.3)', volumeDown: 'rgba(255,23,68,0.3)',
+  },
 ];
 
 const STORAGE_KEY = 'chart-studio:candle-theme:v1';

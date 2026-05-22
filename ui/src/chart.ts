@@ -661,10 +661,6 @@ export class ChartView {
     for (const smc of this.smcPrimitives) {
       try { this.series.detachPrimitive(smc); } catch { /* ignore */ }
     }
-    this.smcPrimitives.add = (smc: any) => {
-      this.smcPrimitives.delete(smc);
-      return this.smcPrimitives.add(smc);
-    }; // Fix for potential issues if I re-add
     this.smcPrimitives.clear();
 
     // Clean up dynamic analytics sub-panes
@@ -923,6 +919,14 @@ export class ChartView {
     this.theme = next;
     saveCandleTheme(id);
     this.series.applyOptions(next.options);
+    
+    // Refresh volume series with new theme colors
+    const vs = this.candles.map((c) => ({
+      time: Math.floor(c.openTime / 1000) as UTCTimestamp,
+      value: c.volume,
+      color: c.close >= c.open ? (next.volumeUp ?? 'rgba(46, 189, 133, 0.35)') : (next.volumeDown ?? 'rgba(246, 70, 93, 0.35)'),
+    }));
+    this.volume.setData(vs);
   }
 
   // ── Drawing layer stubs (klinecharts-style API, no-op until ported) ──
