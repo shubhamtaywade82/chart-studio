@@ -89,6 +89,28 @@ export const CANDLE_THEMES: CandleTheme[] = [
     },
     volumeUp: 'rgba(0,255,200,0.32)', volumeDown: 'rgba(255,45,106,0.32)',
   },
+  {
+    id: 'colorblind-blue-orange',
+    label: 'Colorblind (Blue/Orange)',
+    options: {
+      upColor: '#2962FF', downColor: '#FF6D00',
+      borderUpColor: '#2962FF', borderDownColor: '#FF6D00',
+      wickUpColor: '#2962FF', wickDownColor: '#FF6D00',
+      borderVisible: true, wickVisible: true,
+    },
+    volumeUp: 'rgba(41,98,255,0.35)', volumeDown: 'rgba(255,109,0,0.35)',
+  },
+  {
+    id: 'colorblind-blue-red',
+    label: 'Colorblind (Blue/Red)',
+    options: {
+      upColor: '#2196F3', downColor: '#F44336',
+      borderUpColor: '#2196F3', borderDownColor: '#F44336',
+      wickUpColor: '#2196F3', wickDownColor: '#F44336',
+      borderVisible: true, wickVisible: true,
+    },
+    volumeUp: 'rgba(33,150,243,0.35)', volumeDown: 'rgba(244,67,54,0.35)',
+  },
 ];
 
 const STORAGE_KEY = 'chart-studio:candle-theme:v1';
