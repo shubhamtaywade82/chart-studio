@@ -409,6 +409,7 @@ const main = (): void => {
       },
     ));
     unsubs.push(client.streamTrades(state.provider, state.symbol, (t) => {
+      console.log('Trade received:', t.price, t.qty, t.makerSide);
       updateHeaderPrice(t.price);
       tape.push(t);
       sentiment.push(t);

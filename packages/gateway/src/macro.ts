@@ -1,5 +1,10 @@
 import yahooFinance from 'yahoo-finance2';
 
+// Note: yahoo-finance2 v3+ requires no explicit instantiation for basic usage 
+// but sometimes the environment or build tool (like tsx/ts-node) can cause 
+// the default instance to not be initialized correctly. 
+// We'll use the default instance but ensure we are calling it correctly.
+
 export interface MacroSnapshot {
   spxChange: number;
   ndxChange: number;
@@ -16,7 +21,11 @@ export interface MacroSnapshot {
 export async function fetchMacroSnapshot(): Promise<MacroSnapshot | null> {
   try {
     const symbols = ['^GSPC', '^IXIC', '^VIX', 'USDINR=X', 'BZ=F', '^TNX'];
-    const results = await yahooFinance.quote(symbols) as any[];
+
+    // In some environments, the default export needs to be accessed via .default
+    // or instantiated. We'll try to handle the standard way first.
+    const results = await (yahooFinance as any).quote(symbols);
+
 
     const find = (symbol: string) => results.find((r: any) => r.symbol === symbol);
 

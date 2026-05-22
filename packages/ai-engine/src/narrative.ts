@@ -28,7 +28,9 @@ export async function narrate(
     : `OI: ${t.openInterest}, Change: ${d.oiChange}`;
 
   const prompt = `You are a senior prop desk trader specializing in ${marketType}. 
-Write ONE terse sentence (< 25 words) commenting on the current market state. NO emojis. Use institutional language.
+Write ONE terse sentence (< 25 words) commenting on the current market state. 
+You MUST start your sentence with exactly one of these three tags: [LONG ONLY], [SHORT ONLY], or [AVOID] to indicate the current trading bias.
+NO emojis. Use institutional language.
 
 Context:
 Symbol: ${snap.symbol} (${snap.provider})
@@ -64,8 +66,14 @@ One sentence:`;
   }
   if (d.toxicity > 0.4) parts.push('toxicity elevated');
   if (Math.abs(d.depthImbalance) > 0.4) parts.push(`depth ${d.depthImbalance > 0 ? 'bid' : 'ask'}-skewed`);
+  
+  let tag = '[AVOID]';
+  if (d.vwapDeviation > 0.001 && d.cvd > 0 && d.depthImbalance > 0) tag = '[LONG ONLY]';
+  else if (d.vwapDeviation < -0.001 && d.cvd < 0 && d.depthImbalance < 0) tag = '[SHORT ONLY]';
+
+  const hText = parts.length > 0 ? parts.join(', ') + '.' : 'Market balanced, no significant deviations.';
   return {
-    text: parts.length > 0 ? parts.join('; ') + '.' : 'Balanced tape; no edge.',
+    text: `${tag} ${hText}`,
     urgency: pickUrgency(d.toxicity, Math.abs(d.depthImbalance)),
     ts: snap.timestamp,
   };

@@ -90,6 +90,7 @@ export class RedisAdapter {
   }
 
   private async handleCtrl(raw: string): Promise<void> {
+    console.log(`[redis-adapter] handleCtrl: ${raw}`);
     let msg: CtrlMessage;
     try { msg = JSON.parse(raw); } catch { return; }
     if (msg.op === 'sub') await this.subscribe(msg);
