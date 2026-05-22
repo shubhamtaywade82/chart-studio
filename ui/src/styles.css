@@ -524,7 +524,21 @@ body::before {
 .reasons-list { padding: 4px var(--panel-pad); display: flex; flex-wrap: wrap; gap: 4px; }
 .reason-tag { font-size: 9px; font-weight: 600; background: rgba(124,77,255,0.12); color: #a88bff; border: 1px solid rgba(124,77,255,0.2); border-radius: 3px; padding: 2px 7px; }
 
-/* ── AI Brief ───────────────────────────────────────────────────────── */
+/* ── Morning Brief ──────────────────────────────────────────────────── */
+.morning-brief-body { padding: 12px var(--panel-pad); font-size: 11.5px; line-height: 1.5; color: var(--text-secondary); }
+.mb-narrative { margin-bottom: 12px; font-style: italic; color: var(--text-primary); border-left: 2px solid var(--accent); padding-left: 10px; }
+.mb-section-title { font-size: 9px; font-weight: 800; text-transform: uppercase; color: var(--text-dim); margin: 10px 0 6px; letter-spacing: 0.5px; }
+.mb-list { list-style: none; padding: 0; margin: 0; }
+.mb-list-item { margin-bottom: 6px; position: relative; padding-left: 14px; }
+.mb-list-item::before { content: '•'; position: absolute; left: 0; color: var(--accent); }
+.mb-scenario { background: rgba(255,255,255,0.02); border-radius: 4px; padding: 6px 10px; margin-bottom: 8px; border: 1px solid rgba(255,255,255,0.05); }
+.mb-scenario-trigger { font-weight: 700; color: var(--text-primary); font-size: 10.5px; }
+.mb-scenario-outcome { font-size: 10.5px; margin-top: 2px; }
+.mb-level-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
+.mb-level-price { font-family: var(--font-mono); font-weight: 700; }
+.mb-level-type { font-size: 9px; font-weight: 800; text-transform: uppercase; padding: 1px 4px; border-radius: 3px; }
+.mb-level-type.support { background: var(--bull-dim); color: var(--bull); }
+.mb-level-type.resistance { background: var(--bear-dim); color: var(--bear); }
 .ai-brief-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px var(--panel-pad); font-size: 12px; line-height: 1.55; color: var(--text-secondary); scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .ai-brief-body::-webkit-scrollbar { width: 4px; }
 .ai-brief-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }

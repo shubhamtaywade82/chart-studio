@@ -31,6 +31,15 @@ export interface AnalyticsData {
   depthBids: DepthLevel[] | undefined; depthAsks: DepthLevel[] | undefined;
   prevClose: number | undefined; prevOi: number | undefined;
   optionChain: OptionChainData | undefined;
+  cryptoMetrics?: {
+    fundingRate: number;
+    fundingRateAPR: number;
+    nextFundingTime: number;
+    longShortRatio: number;
+    openInterestUsd: number;
+    basisPct: number;
+    liquidations?: { long: number; short: number; cascadeDetected?: boolean };
+  };
 }
 
 export type Urgency = 'none' | 'watch_only' | 'next_5min' | 'this_candle' | 'immediate' | 'critical';

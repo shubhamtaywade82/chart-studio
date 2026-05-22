@@ -119,22 +119,52 @@ export class DhanProvider implements MarketDataProvider {
     const items = await fetchOptionChain(this.client, ins);
     const maxPain = calculateMaxPain(items);
 
-    // Greeks calculation: we need DTE (T)
-    // Find an option for this underlying to get near-month expiry
-    const options = this.instrumentCache.filter(i => i.symbolName.startsWith(ins.symbolName) && (i.instrumentType.startsWith('OPT') || i.instrumentType === 'OP'));
-    const nearExpiry = options.length > 0 ? options[0]?.expiryDate : undefined;
-    
-    let T = 7 / 365; // Default 1 week
-    if (nearExpiry) {
-      const expiryTs = Date.parse(nearExpiry);
-      const now = Date.now();
-      T = Math.max(0.5, (expiryTs - now) / (1000 * 60 * 60 * 24)) / 365;
-    }
-
     const engine = new GreeksEngine();
+    const now = Date.now();
+
     const strikesWithGreeks = items.map(item => {
-      const callGreeks = engine.calculate(S, item.strikePrice, T, item.callIV || 0.15, true);
-      const putGreeks = engine.calculate(S, item.strikePrice, T, item.putIV || 0.15, false);
+      // Find the specific option instruments to get exact expiry dates
+      const callOpt = this.instrumentCache.find(i => 
+        i.symbolName.startsWith(ins.symbolName) && 
+        (i.instrumentType.startsWith('OPT') || i.instrumentType === 'OP') &&
+        i.strikePrice === item.strikePrice &&
+        i.optionType === 'CE'
+      );
+      
+      const putOpt = this.instrumentCache.find(i => 
+        i.symbolName.startsWith(ins.symbolName) && 
+        (i.instrumentType.startsWith('OPT') || i.instrumentType === 'OP') &&
+        i.strikePrice === item.strikePrice &&
+        i.optionType === 'PE'
+      );
+
+      // Default to 7 days if exact expiry not found
+      let callT = 7 / 365;
+      if (callOpt?.expiryDate) {
+        const expiryTs = Date.parse(callOpt.expiryDate);
+        callT = Math.max(0.5, (expiryTs - now) / (1000 * 60 * 60 * 24)) / 365;
+      }
+      
+      let putT = 7 / 365;
+      if (putOpt?.expiryDate) {
+        const expiryTs = Date.parse(putOpt.expiryDate);
+        putT = Math.max(0.5, (expiryTs - now) / (1000 * 60 * 60 * 24)) / 365;
+      }
+
+      let callIV = item.callIV;
+      if (!callIV || callIV <= 0) {
+        callIV = engine.calculateIV(S, item.strikePrice, callT, item.callLTP, true);
+        item.callIV = callIV; // Update item so it shows in UI
+      }
+
+      let putIV = item.putIV;
+      if (!putIV || putIV <= 0) {
+        putIV = engine.calculateIV(S, item.strikePrice, putT, item.putLTP, false);
+        item.putIV = putIV; // Update item so it shows in UI
+      }
+
+      const callGreeks = engine.calculate(S, item.strikePrice, callT, callIV || 0.15, true);
+      const putGreeks = engine.calculate(S, item.strikePrice, putT, putIV || 0.15, false);
       
       return {
         ...item,

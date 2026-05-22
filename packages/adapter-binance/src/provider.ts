@@ -20,6 +20,10 @@ import {
   toSymbolRef,
 } from './rest';
 import { BinanceStreamPool, parseKlineEvent } from './ws';
+import { FundingRateTracker } from './funding-rate';
+import { LiquidationFeed } from './liquidation-feed';
+import { BasisTracker } from './basis-tracker';
+import { OIDeltaTracker } from './oi-delta';
 
 interface DepthRaw { U?: number; u?: number; pu?: number; E?: number; b?: [string, string][]; a?: [string, string][] }
 interface AggTradeRaw { p?: string; q?: string; T?: number; m?: boolean; a?: number }
@@ -36,6 +40,15 @@ interface BinanceAnalyticsPayload {
   depthBids: Array<{ price: number; qty: number; orders: number }> | undefined;
   depthAsks: Array<{ price: number; qty: number; orders: number }> | undefined;
   prevClose: number | undefined; prevOi: number | undefined;
+  cryptoMetrics?: {
+    fundingRate: number;
+    fundingRateAPR: number;
+    nextFundingTime: number;
+    longShortRatio: number;
+    openInterestUsd: number;
+    basisPct: number;
+    liquidations?: { long: number; short: number; cascadeDetected?: boolean };
+  };
 }
 
 const segmentLabel = (cfg: BinanceConfig): string => (cfg.product === 'spot' ? 'spot' : 'futures');
@@ -44,11 +57,20 @@ export class BinanceProvider implements MarketDataProvider {
   readonly id: string;
   readonly displayName: string;
   private readonly pool: BinanceStreamPool;
+  
+  private fundingTracker: FundingRateTracker;
+  private liquidationFeed: LiquidationFeed;
+  private basisTracker: BasisTracker;
+  private oiTracker: OIDeltaTracker;
 
   constructor(private readonly cfg: BinanceConfig & { id?: string; displayName?: string }) {
     this.id = cfg.id ?? (cfg.product === 'spot' ? 'binance-spot' : 'binance-usdm');
     this.displayName = cfg.displayName ?? (cfg.product === 'spot' ? 'Binance Spot' : 'Binance USD-M Futures');
     this.pool = new BinanceStreamPool(cfg);
+    this.fundingTracker = new FundingRateTracker(cfg);
+    this.liquidationFeed = new LiquidationFeed();
+    this.basisTracker = new BasisTracker();
+    this.oiTracker = new OIDeltaTracker(cfg);
   }
 
   async init(): Promise<void> {
@@ -188,10 +210,62 @@ export class BinanceProvider implements MarketDataProvider {
       oi: undefined as number | undefined,
       depthBids: undefined as Array<{ price: number; qty: number; orders: number }> | undefined,
       depthAsks: undefined as Array<{ price: number; qty: number; orders: number }> | undefined,
+      fundingRate: 0, fundingRateAPR: 0, nextFundingTime: 0, longShortRatio: 0,
+      liqLong: 0, liqShort: 0, cascade: false
     };
+
+    let pollingTimer: ReturnType<typeof setInterval>;
+    if (this.cfg.product === 'usdm') {
+      const pollCrypto = async () => {
+        try {
+          const [funding, oiData, lsData] = await Promise.all([
+            this.fundingTracker.getPremiumIndex(symbol),
+            this.oiTracker.getOpenInterest(symbol),
+            this.oiTracker.getLongShortRatio(symbol)
+          ]);
+          if (funding) {
+            state.fundingRate = funding.fundingRate;
+            state.fundingRateAPR = funding.fundingRateAPR;
+            state.nextFundingTime = funding.nextFundingTime;
+          }
+          if (oiData) state.oi = oiData.openInterest;
+          if (lsData) state.longShortRatio = lsData.longShortRatio;
+          
+          const liqStatus = this.liquidationFeed.getRecentCascades(symbol);
+          state.cascade = liqStatus.cascadeDetected;
+          
+          // Assuming 1 min bucket is the latest
+          const latestBucket = Array.from(this.liquidationFeed['buckets'].values()).sort((a,b) => b.timestamp - a.timestamp)[0];
+          if (latestBucket) {
+            state.liqLong = latestBucket.longLiqUsd;
+            state.liqShort = latestBucket.shortLiqUsd;
+          }
+        } catch (e) {
+          // ignore polling errors
+        }
+      };
+      
+      pollCrypto();
+      pollingTimer = setInterval(pollCrypto, 30_000);
+    }
 
     const emit = (): void => {
       if (state.ltp <= 0) return;
+      
+      const cryptoMetrics = this.cfg.product === 'usdm' ? {
+        fundingRate: state.fundingRate,
+        fundingRateAPR: state.fundingRateAPR,
+        nextFundingTime: state.nextFundingTime,
+        longShortRatio: state.longShortRatio,
+        openInterestUsd: state.oi && state.ltp ? state.oi * state.ltp : 0,
+        basisPct: this.basisTracker.getBasis(symbol)?.basisPct ?? 0,
+        liquidations: {
+          long: state.liqLong,
+          short: state.liqShort,
+          cascadeDetected: state.cascade
+        }
+      } : undefined;
+
       onData({
         ltp: state.ltp,
         atp: state.atp,
@@ -211,6 +285,7 @@ export class BinanceProvider implements MarketDataProvider {
         depthAsks: state.depthAsks,
         prevClose: state.prevClose && state.prevClose > 0 ? state.prevClose : undefined,
         prevOi: undefined,
+        cryptoMetrics,
       });
     };
 
@@ -225,6 +300,11 @@ export class BinanceProvider implements MarketDataProvider {
       state.ltt = ts;
       if (r.m) state.totalSellQty += qty;
       else state.totalBuyQty += qty;
+      if (this.cfg.product === 'usdm') {
+        this.basisTracker.updatePerpPrice(symbol, price);
+      } else {
+        this.basisTracker.updateSpotPrice(symbol, price);
+      }
       emit();
     });
 
@@ -313,12 +393,28 @@ export class BinanceProvider implements MarketDataProvider {
     const pollTimer = setInterval(() => { void pollTick(); }, 1500);
     void pollTick();
 
+    const unsubForce = this.cfg.product === 'usdm' ? this.pool.subscribe(`${sym}@forceOrder`, (raw) => {
+      const payload = (raw as { o: any })?.o;
+      if (payload) {
+        this.liquidationFeed.processEvent({
+          symbol: payload.s,
+          side: payload.S as 'BUY' | 'SELL',
+          price: Number(payload.p),
+          qty: Number(payload.q),
+          notionalUsd: Number(payload.p) * Number(payload.q),
+          time: Number(payload.T)
+        });
+      }
+    }) : () => {};
+
     return () => {
-      clearInterval(pollTimer);
       unsubAgg();
       unsubTicker();
       unsubDepth();
       unsubMark();
+      unsubForce();
+      if (pollingTimer) clearInterval(pollingTimer);
+      clearInterval(pollTimer);
     };
   }
 

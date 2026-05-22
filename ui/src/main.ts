@@ -21,6 +21,10 @@ import { GreeksPanel } from './panels/greeks-panel';
 import { MarginGauge } from './panels/margin-gauge';
 import { AiTradeCard } from './panels/ai-trade-card';
 import { IVSkewPrimitive } from './chart/iv-skew-primitive';
+import { CryptoDashboard } from './panels/crypto-dashboard';
+import { StraddleDashboard } from './panels/straddle-dashboard';
+import { ExpiryCountdown } from './panels/expiry-countdown';
+import { MorningBriefPanel } from './panels/morning-brief';
 
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
@@ -83,11 +87,15 @@ const main = (): void => {
   const aiBrief = new AIBriefPanel();
   const strategySignals = new StrategySignalsPanel(client);
   const smartSignals = new SmartSignalsPanel();
+  const morningBriefPanel = new MorningBriefPanel();
   const optionChain = new OptionChainPanel(document.getElementById('option-chain-panel')!);
   const greeksPanel = new GreeksPanel(document.getElementById('greeks-panel-container')!);
   const marginGauge = new MarginGauge(document.getElementById('margin-gauge-panel')!);
   const aiTradeCard = new AiTradeCard(document.getElementById('ai-trade-card-host')!);
   const ivSkewPanel = new IVSkewPrimitive(document.getElementById('iv-skew-panel')!);
+  const cryptoDashboard = new CryptoDashboard(document.getElementById('crypto-dashboard-host')!);
+  const straddleDashboard = new StraddleDashboard(document.getElementById('straddle-dashboard-host')!);
+  const expiryCountdown = new ExpiryCountdown(document.getElementById('expiry-countdown-host')!);
 
 
 
@@ -342,6 +350,9 @@ const main = (): void => {
     tape.reset();
     sentiment.reset();
     optionChain.update(null as any);
+    cryptoDashboard.reset();
+    straddleDashboard.reset();
+    expiryCountdown.reset();
     tapeBuys = 0; tapeSells = 0;
     if (tapeBuysEl) tapeBuysEl.textContent = '0';
     if (tapeSellsEl) tapeSellsEl.textContent = '0';
@@ -421,6 +432,29 @@ const main = (): void => {
       updateHeaderPrice(data.ltp);
       if (data.optionChain) {
         optionChain.update(data.optionChain);
+        
+        // Mock straddle data updates based on option chain
+        const atmStrike = data.optionChain.atmStrike || 24500;
+        straddleDashboard.update({
+          underlying: state.symbol,
+          strike: atmStrike,
+          callLtp: 150,
+          putLtp: 160,
+          delta: 0.05,
+          gamma: 0.002,
+          theta: -12.5,
+          vega: 80,
+          pnl: 1250
+        });
+
+        // Set expiry dynamically (assume next Thursday)
+        const nextThursday = new Date();
+        nextThursday.setDate(nextThursday.getDate() + (4 + 7 - nextThursday.getDay()) % 7);
+        nextThursday.setHours(15, 30, 0, 0);
+        expiryCountdown.setExpiry(nextThursday.getTime(), 'Weekly');
+      }
+      if (data.cryptoMetrics) {
+        cryptoDashboard.update(data.cryptoMetrics);
       }
       }));
 

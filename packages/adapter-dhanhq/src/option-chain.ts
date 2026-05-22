@@ -97,6 +97,45 @@ export class GreeksEngine {
 
     return { delta, gamma, theta, vega, rho };
   }
+
+  /**
+   * Calculate Implied Volatility using Newton-Raphson root finding.
+   */
+  calculateIV(S: number, K: number, T: number, marketPrice: number, isCall: boolean): number {
+    if (T <= 0 || marketPrice <= 0) return 0;
+    
+    // Initial guess: Brenner & Subrahmanyam (1988) approximation
+    let sigma = Math.sqrt(2 * Math.PI / T) * (marketPrice / S);
+    if (sigma === 0 || isNaN(sigma)) sigma = 0.2; // Fallback guess
+
+    for (let i = 0; i < 50; i++) {
+      const d1 = (Math.log(S / K) + (this.r + (sigma * sigma) / 2) * T) / (sigma * Math.sqrt(T));
+      const d2 = d1 - sigma * Math.sqrt(T);
+
+      // Price under current sigma
+      let price = 0;
+      if (isCall) {
+        price = S * this.N(d1) - K * Math.exp(-this.r * T) * this.N(d2);
+      } else {
+        price = K * Math.exp(-this.r * T) * this.N(-d2) - S * this.N(-d1);
+      }
+
+      // Vega is the same for Call and Put
+      const vega = S * this.n_prime(d1) * Math.sqrt(T);
+
+      if (Math.abs(price - marketPrice) < 0.001) {
+        return sigma; // Converged
+      }
+
+      if (vega === 0) {
+        return sigma; // Stuck
+      }
+
+      sigma = sigma - (price - marketPrice) / vega;
+    }
+
+    return sigma > 0 ? sigma : 0;
+  }
 }
 
 /**

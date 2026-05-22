@@ -56,6 +56,16 @@ const snapshots = new Map<string, CachedSymbolState>();
 /** symbolKey -> interval -> candles */
 const candleCache = new Map<string, Map<string, CandleData[]>>();
 
+let morningBrief: any = null;
+
+export function cacheMorningBrief(data: any): void {
+  morningBrief = data;
+}
+
+export function getMorningBrief(): any {
+  return morningBrief;
+}
+
 export function cacheAnalytics(provider: string, symbol: string, tick: TickData, derived: DerivedData, ts: number): void {
   const key = `${provider}:${symbol.toUpperCase()}`;
   // We don't attach candles here anymore; handleBriefRequest will gather them.

@@ -22,7 +22,25 @@ export class IVSkewPrimitive {
   private putSeries: ISeriesApi<'Line'>;
 
   constructor(private container: HTMLElement) {
-    this.chartApi = createChart(this.container, {
+    this.container.innerHTML = `
+      <div style="display: flex; flex-direction: column; height: 100%;">
+        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 4px;">
+          <div style="display: flex; gap: 12px; font-size: 11px;">
+            <span class="active-tab" style="color: var(--text-primary); border-bottom: 2px solid var(--accent); padding-bottom: 2px; cursor: pointer;">Smile</span>
+            <span style="color: var(--text-dim); cursor: pointer;">Term Structure</span>
+            <span style="color: var(--text-dim); cursor: pointer;">Surface 3D</span>
+          </div>
+          <div id="skew-metrics" style="font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);">
+            Steepness: -
+          </div>
+        </div>
+        <div id="iv-chart-container" style="flex: 1; min-height: 180px; position: relative;"></div>
+      </div>
+    `;
+
+    const chartContainer = this.container.querySelector('#iv-chart-container') as HTMLElement;
+
+    this.chartApi = createChart(chartContainer, {
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
         textColor: '#888',
@@ -82,6 +100,17 @@ export class IVSkewPrimitive {
     this.putSeries.setData(putData);
 
     this.chartApi.timeScale().fitContent();
+
+    // Update Skew Steepness metric (25d Put - 25d Call) / ATM
+    const put25 = data.find(d => Math.abs(d.delta - (-25)) < 5)?.putIV;
+    const call25 = data.find(d => Math.abs(d.delta - 25) < 5)?.callIV;
+    const atm = data.find(d => Math.abs(d.delta - 0) < 5)?.callIV;
+
+    const metricsEl = this.container.querySelector('#skew-metrics');
+    if (metricsEl && put25 && call25 && atm) {
+      const steepness = (put25 - call25) / atm;
+      metricsEl.textContent = `Steepness: ${steepness.toFixed(3)}`;
+    }
   }
 
   resize(width: number, height: number) {
