@@ -155,19 +155,48 @@ export class AIOverlayManager {
   }
 
   // ── 5. Narrative ticker ──
+  private narrativeInterval: any = null;
+
   applyNarrative(text: string, urgency: Urgency): void {
     const el = this.ensureNarrativeBar();
+    const body = document.getElementById('ai-hud-body');
+    const status = document.getElementById('ai-hud-status');
+    if (!body || !status) return;
+
     el.style.display = 'block';
-    const color = urgency === 'immediate' ? '#ff5252'
-      : urgency === 'this_candle' ? '#ffd740'
-      : urgency === 'next_5min' ? '#bdbdbd'
-      : '#9c9c9c';
-    el.style.color = color;
-    el.style.borderLeftColor = color;
-    el.textContent = text;
-    if (urgency === 'immediate') {
-      el.classList.add('ai-pulse');
-      setTimeout(() => el.classList.remove('ai-pulse'), 4000);
+    
+    const colors: Record<Urgency, string> = {
+      none: '#9c9c9c',
+      watch_only: '#9c9c9c',
+      next_5min: '#bdbdbd',
+      this_candle: '#ffd740',
+      immediate: '#ff5252',
+      critical: '#ff1744',
+    };
+    const color = colors[urgency];
+    el.style.borderColor = `rgba(${urgency === 'immediate' || urgency === 'critical' ? '255,82,82' : '124,77,255'}, 0.3)`;
+    status.style.color = color;
+    status.textContent = `[${urgency.toUpperCase()}]`;
+
+    // Typewriter effect
+    if (this.narrativeInterval) clearInterval(this.narrativeInterval);
+    body.innerHTML = '';
+    let i = 0;
+    this.narrativeInterval = setInterval(() => {
+      if (i < text.length) {
+        body.innerHTML += text[i] === '\n' ? '<br>' : escapeHtml(text[i]!);
+        i++;
+      } else {
+        clearInterval(this.narrativeInterval);
+      }
+    }, 20);
+
+    if (urgency === 'immediate' || urgency === 'critical') {
+      el.animate([
+        { boxShadow: '0 0 0px rgba(255,82,82,0)' },
+        { boxShadow: '0 0 15px rgba(255,82,82,0.4)' },
+        { boxShadow: '0 0 0px rgba(255,82,82,0)' }
+      ], { duration: 1000, iterations: 3 });
     }
   }
 
@@ -291,25 +320,41 @@ export class AIOverlayManager {
   }
 
   private ensureNarrativeBar(): HTMLElement {
-    let el = document.getElementById('ai-narrative-bar');
+    let el = document.getElementById('ai-narrative-hud');
     if (el) return el;
     el = document.createElement('div');
-    el.id = 'ai-narrative-bar';
+    el.id = 'ai-narrative-hud';
+    el.className = 'chart-floating-widget';
     el.style.cssText = `
-      position: absolute; bottom: 32px; left: 12px; right: 12px;
-      padding: 8px 16px;
-      font-size: 12px;
-      font-family: 'SF Mono', Consolas, monospace;
-      background: rgba(19,23,34,0.95);
-      backdrop-filter: blur(8px);
-      border-left: 3px solid #7c4dff;
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      position: absolute; bottom: 40px; right: 12px;
+      width: 280px; min-height: 80px;
+      padding: 0;
+      font-size: 11px;
+      font-family: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+      background: rgba(13,17,25,0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(124,77,255,0.2);
+      border-top: 2px solid #7c4dff;
+      border-radius: 4px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
       z-index: 105;
       display: none;
+      overflow: hidden;
+      color: #e0e0e0;
+      transition: border-color 0.3s;
     `;
+    
+    el.innerHTML = `
+      <div style="background: rgba(124,77,255,0.1); padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-weight: 800; font-size: 9px; color: #7c4dff; letter-spacing: 1px;">AI NARRATIVE LOG</span>
+        <span id="ai-hud-status" style="font-size: 8px; color: #00e676; opacity: 0.8;">[LIVE]</span>
+      </div>
+      <div id="ai-hud-body" style="padding: 10px; line-height: 1.5; min-height: 40px;"></div>
+      <div style="height: 2px; background: repeating-linear-gradient(90deg, transparent, transparent 2px, rgba(124,77,255,0.3) 2px, rgba(124,77,255,0.3) 4px); opacity: 0.5;"></div>
+    `;
+
     this.container.appendChild(el);
+    makeDraggable(el, 'ai-narrative-hud');
     return el;
   }
 
