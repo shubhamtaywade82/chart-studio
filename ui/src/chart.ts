@@ -326,7 +326,7 @@ export class ChartView {
     const vs = this.candles.map((c) => ({
       time: Math.floor(c.openTime / 1000) as UTCTimestamp,
       value: c.volume,
-      color: c.close >= c.open ? 'rgba(46, 189, 133, 0.35)' : 'rgba(246, 70, 93, 0.35)',
+      color: c.close >= c.open ? (this.theme.volumeUp ?? 'rgba(46, 189, 133, 0.35)') : (this.theme.volumeDown ?? 'rgba(246, 70, 93, 0.35)'),
     }));
     this.series.setData(cs);
     this.volume.setData(vs);
@@ -374,7 +374,7 @@ export class ChartView {
         this.volume.update({
           time: t,
           value: c.volume,
-          color: c.close >= c.open ? 'rgba(46, 189, 133, 0.35)' : 'rgba(246, 70, 93, 0.35)',
+          color: c.close >= c.open ? (this.theme.volumeUp ?? 'rgba(46, 189, 133, 0.35)') : (this.theme.volumeDown ?? 'rgba(246, 70, 93, 0.35)'),
         });
         this.lastUpdatedTime = t;
       } catch (e) {
@@ -488,7 +488,7 @@ export class ChartView {
       this.volume.update({
         time: t,
         value: last.volume,
-        color: animatedPrice >= last.open ? 'rgba(46, 189, 133, 0.6)' : 'rgba(246, 70, 93, 0.6)',
+        color: animatedPrice >= last.open ? (this.theme.volumeUp ?? 'rgba(46, 189, 133, 0.6)') : (this.theme.volumeDown ?? 'rgba(246, 70, 93, 0.6)'),
       });
     } catch (e) {
       console.warn('[chart] animation update skipped', e);
