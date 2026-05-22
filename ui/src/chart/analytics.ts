@@ -37,6 +37,7 @@ export class AnalyticsRenderer {
   /** First-tick flags to avoid spurious deltas on symbol switch. */
   private buyInit = false;
   private oiInit = false;
+  private lastOptionLineUpdate = 0;
 
   constructor(private chart: IChartApi, private mainSeries: ISeriesApi<'Candlestick'>) {}
 
@@ -57,9 +58,16 @@ export class AnalyticsRenderer {
     }
     this.optionLevelLines.clear();
     this.dayLevelLastPrice?.clear();
+    this.lastOptionLineUpdate = 0;
   }
 
   updateOptionChain(data: any): void {
+    const now = Date.now();
+    if (now - this.lastOptionLineUpdate < 60000 && this.optionLevelLines.size > 0) {
+      return;
+    }
+    this.lastOptionLineUpdate = now;
+
     const { maxPain, supportOI, resistanceOI } = data;
 
     // Clear old option lines
