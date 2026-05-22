@@ -49,10 +49,15 @@ export class OllamaClient {
     if (!this.isAvailable()) return null;
 
     try {
-      const res = await this.client.generate({
+      const messages = [];
+      if (opts.system) {
+        messages.push({ role: 'system', content: opts.system });
+      }
+      messages.push({ role: 'user', content: opts.prompt });
+
+      const res = await this.client.chat({
         model: opts.model,
-        prompt: opts.prompt,
-        system: opts.system,
+        messages,
         stream: false,
         format: opts.json ? 'json' : undefined,
         options: {
@@ -63,7 +68,7 @@ export class OllamaClient {
       });
       
       this.failureCount = 0;
-      return res.response || null;
+      return res.message.content || null;
     } catch (err) {
       this.recordFailure(err);
       return null;
