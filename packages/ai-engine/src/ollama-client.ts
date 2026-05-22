@@ -33,9 +33,13 @@ export class OllamaClient {
   private failureCount = 0;
   private circuitOpenUntil = 0;
 
-  constructor(host = process.env.OLLAMA_HOST ?? 'http://localhost:11434') {
-    this.host = host.replace(/\/$/, '');
+  private apiKey?: string;
+
+  constructor() {
+    const mode = process.env.OLLAMA_MODE === 'cloud' ? 'cloud' : 'local';
+    this.host = mode === 'cloud' ? 'https://ollama.com' : 'http://localhost:11434';
     this.disabled = process.env.OLLAMA_DISABLE === '1';
+    this.apiKey = process.env.OLLAMA_API_KEY;
   }
 
   isAvailable(): boolean {
@@ -59,12 +63,15 @@ export class OllamaClient {
     if (opts.json) body.format = 'json';
     if (opts.system) body.system = opts.system;
 
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
+
     const ctrl = new AbortController();
     const tid = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 20_000);
     try {
       const res = await fetch(`${this.host}/api/generate`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers,
         body: JSON.stringify(body),
         signal: ctrl.signal,
       });
@@ -95,12 +102,15 @@ export class OllamaClient {
 
   async embed(opts: OllamaEmbeddingOptions): Promise<number[] | null> {
     if (!this.isAvailable()) return null;
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
+
     const ctrl = new AbortController();
     const tid = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 10_000);
     try {
       const res = await fetch(`${this.host}/api/embeddings`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers,
         body: JSON.stringify({ model: opts.model, prompt: opts.prompt }),
         signal: ctrl.signal,
       });

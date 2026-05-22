@@ -1,5 +1,6 @@
 import WebSocket from 'ws';
 import type { TokenProvider } from './token-provider';
+import { getIndianMarketStatus } from './market-time';
 
 /**
  * Dhan v2 Live Market Feed binary protocol.
@@ -249,6 +250,7 @@ export class DhanStreamPool {
   private readonly subs = new Map<string, InternalSub>(); // key = `${seg}:${secId}`
   private readonly lastTicks = new Map<string, DhanTick>(); // key = `${seg}:${secId}`
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private marketCheckTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private closed = false;
   private mode: number;
@@ -263,6 +265,7 @@ export class DhanStreamPool {
 
   constructor(private readonly tokens: TokenProvider, mode: 'ticker' | 'quote' | 'full' = 'full') {
     this.mode = mode === 'ticker' ? REQ_TICKER : mode === 'quote' ? REQ_QUOTE : REQ_FULL;
+    this.checkMarketHours();
 
     // Proactive WebSocket rotation: when the token provider rotates the token,
     // we force a terminate and reconnect to use the fresh creds.
@@ -306,13 +309,8 @@ export class DhanStreamPool {
 
   shutdown(): void {
     this.closed = true;
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = null;
-    this.stopHeartbeat();
-    if (this.ws) {
-      try { this.ws.send(JSON.stringify({ RequestCode: REQ_DISCONNECT })); } catch { /* noop */ }
-      try { this.ws.close(); } catch { /* noop */ }
-    }
+    if (this.marketCheckTimer) clearTimeout(this.marketCheckTimer);
+    this.shutdownWs();
   }
 
   /**
@@ -320,6 +318,33 @@ export class DhanStreamPool {
    * so we use TCP-level WebSocket pings AND a 30-second idle threshold:
    * if no frame in 30s with active subs, force-reconnect.
    */
+  private checkMarketHours(): void {
+    if (this.marketCheckTimer) clearTimeout(this.marketCheckTimer);
+    
+    const status = getIndianMarketStatus();
+    if (!status.isOpen) {
+      if (this.ws) {
+        console.log(`[adapter-dhanhq] Market closed (${status.reason}). Disconnecting...`);
+        this.shutdownWs();
+      }
+    } else if (this.subs.size > 0 && !this.ws) {
+      console.log(`[adapter-dhanhq] Market open. Resuming connections...`);
+      this.ensureConnected();
+    }
+
+    this.marketCheckTimer = setTimeout(() => this.checkMarketHours(), status.nextCheckMs);
+  }
+
+  private shutdownWs(): void {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.stopHeartbeat();
+    if (this.ws) {
+      try { this.ws.removeAllListeners(); this.ws.terminate(); } catch { /* ignore */ }
+      this.ws = null;
+    }
+  }
+
   private startHeartbeat(): void {
     this.stopHeartbeat();
     this.lastFrameAt = Date.now();
@@ -344,6 +369,14 @@ export class DhanStreamPool {
 
   private ensureConnected(): void {
     if (this.closed) return;
+    
+    // Validate market hours before connecting
+    const status = getIndianMarketStatus();
+    if (!status.isOpen) {
+      console.log(`[adapter-dhanhq] Connection deferred: ${status.reason}`);
+      return;
+    }
+
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return;
     void this.connect();
   }

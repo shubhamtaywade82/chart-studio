@@ -105,16 +105,17 @@ class LtpPaneView implements IPrimitivePaneView {
         target.useBitmapCoordinateSpace((scope: any) => {
           const ctx: CanvasRenderingContext2D = scope.context;
           const dpr: number = scope.bitmapSize.width / scope.mediaSize.width;
-          const bY = y * dpr;
-          const bXStart = Math.max(0, xStart * dpr);
+          const bY = Math.round(y * dpr);
+          const bXStart = Math.max(0, Math.round(xStart * dpr));
           const bXEnd: number = scope.bitmapSize.width;
 
           ctx.save();
 
           ctx.beginPath();
-          ctx.setLineDash([5 * dpr, 5 * dpr]);
+          const dash = Math.round(5 * dpr);
+          ctx.setLineDash([dash, dash]);
           ctx.strokeStyle = color;
-          ctx.lineWidth = dpr;
+          ctx.lineWidth = Math.max(1, Math.floor(dpr));
           ctx.globalAlpha = 0.8;
           ctx.moveTo(bXStart, bY);
           ctx.lineTo(bXEnd, bY);
@@ -125,11 +126,11 @@ class LtpPaneView implements IPrimitivePaneView {
             ctx.fillStyle = color;
             ctx.globalAlpha = 0.4;
             ctx.beginPath();
-            ctx.arc(bXStart, bY, 4 * dpr, 0, Math.PI * 2);
+            ctx.arc(bXStart, bY, Math.round(4 * dpr), 0, Math.PI * 2);
             ctx.fill();
             ctx.globalAlpha = 1.0;
             ctx.beginPath();
-            ctx.arc(bXStart, bY, 2 * dpr, 0, Math.PI * 2);
+            ctx.arc(bXStart, bY, Math.round(2 * dpr), 0, Math.PI * 2);
             ctx.fill();
           }
 

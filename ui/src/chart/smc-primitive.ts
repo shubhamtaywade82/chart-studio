@@ -391,11 +391,11 @@ class SmcPaneView implements IPrimitivePaneView {
               ? ts.timeToCoordinate(fvg.mitigatedTime)
               : null;
             
-            const bYMin = yMax * dpr;
-            const bYMax = yMin * dpr;
+            const bYMin = Math.round(yMax * dpr);
+            const bYMax = Math.round(yMin * dpr);
             const bYHeight = bYMax - bYMin;
-            const bXStart = xStart * dpr;
-            const bXEnd = xEnd !== null ? xEnd * dpr : bWidth;
+            const bXStart = Math.round(xStart * dpr);
+            const bXEnd = xEnd !== null ? Math.round(xEnd * dpr) : bWidth;
             const bXWidth = bXEnd - bXStart;
 
             if (bXWidth <= 0 || bYHeight <= 0) continue;
@@ -408,13 +408,13 @@ class SmcPaneView implements IPrimitivePaneView {
             ctx.strokeStyle = fvg.type === 'bullish'
               ? 'rgba(76, 175, 80, 0.15)'
               : 'rgba(255, 152, 0, 0.15)';
-            ctx.lineWidth = dpr;
+            ctx.lineWidth = Math.max(1, Math.floor(dpr));
             ctx.strokeRect(bXStart, bYMin, bXWidth, bYHeight);
 
             // Add FVG label
             ctx.fillStyle = fvg.type === 'bullish' ? '#81c784' : '#ffb74d';
-            ctx.font = `${8 * dpr}px sans-serif`;
-            ctx.fillText('FVG', bXStart + 4 * dpr, bYMin + 10 * dpr);
+            ctx.font = `${Math.round(8 * dpr)}px sans-serif`;
+            ctx.fillText('FVG', bXStart + Math.round(4 * dpr), bYMin + Math.round(10 * dpr));
           }
 
           // ── 2. Draw Order Blocks ──
@@ -429,11 +429,11 @@ class SmcPaneView implements IPrimitivePaneView {
               ? ts.timeToCoordinate(ob.mitigatedTime)
               : null;
 
-            const bYMin = yMax * dpr;
-            const bYMax = yMin * dpr;
+            const bYMin = Math.round(yMax * dpr);
+            const bYMax = Math.round(yMin * dpr);
             const bYHeight = bYMax - bYMin;
-            const bXStart = xStart * dpr;
-            const bXEnd = xEnd !== null ? xEnd * dpr : bWidth;
+            const bXStart = Math.round(xStart * dpr);
+            const bXEnd = xEnd !== null ? Math.round(xEnd * dpr) : bWidth;
             const bXWidth = bXEnd - bXStart;
 
             if (bXWidth <= 0 || bYHeight <= 0) continue;
@@ -448,17 +448,15 @@ class SmcPaneView implements IPrimitivePaneView {
             ctx.strokeStyle = ob.type === 'bullish'
               ? `rgba(38, 166, 154, ${0.4 * opacityMultiplier})`
               : `rgba(239, 83, 80, ${0.4 * opacityMultiplier})`;
-            ctx.lineWidth = dpr;
+            ctx.lineWidth = Math.max(1, Math.floor(dpr));
             ctx.strokeRect(bXStart, bYMin, bXWidth, bYHeight);
 
             // OB label
             ctx.fillStyle = ob.type === 'bullish' ? '#4db6ac' : '#e57373';
-            ctx.font = `${9 * dpr}px sans-serif`;
-            ctx.fillText(
-              `OB ${ob.type === 'bullish' ? '+' : '-'}${ob.mitigated ? ' (Mitigated)' : ''}`,
-              bXStart + 6 * dpr,
-              bYMin + 12 * dpr
-            );
+            ctx.font = `${Math.round(9 * dpr)}px sans-serif`;
+            if (ob.type === 'bullish') {
+              ctx.fillText('OB', bXStart + Math.round(6 * dpr), bYMin + Math.round(12 * dpr));
+            }
           }
 
           // ── 3. Draw BOS Lines ──
@@ -469,13 +467,14 @@ class SmcPaneView implements IPrimitivePaneView {
 
             if (y === null || xStart === null || xEnd === null) continue;
 
-            const bY = y * dpr;
-            const bXStart = xStart * dpr;
-            const bXEnd = xEnd * dpr;
+            const bY = Math.round(y * dpr);
+            const bXStart = Math.round(xStart * dpr);
+            const bXEnd = Math.round(xEnd * dpr);
 
             ctx.strokeStyle = item.type === 'bullish' ? '#26a69a' : '#ef5350';
-            ctx.lineWidth = dpr;
-            ctx.setLineDash([4 * dpr, 4 * dpr]);
+            ctx.lineWidth = Math.max(1, Math.floor(dpr));
+            const dash = Math.round(4 * dpr);
+            ctx.setLineDash([dash, dash]);
             ctx.beginPath();
             ctx.moveTo(bXStart, bY);
             ctx.lineTo(bXEnd, bY);
@@ -483,9 +482,9 @@ class SmcPaneView implements IPrimitivePaneView {
 
             // Label
             ctx.fillStyle = item.type === 'bullish' ? '#26a69a' : '#ef5350';
-            ctx.font = `${9 * dpr}px sans-serif`;
+            ctx.font = `${Math.round(9 * dpr)}px sans-serif`;
             ctx.setLineDash([]);
-            ctx.fillText('BOS', bXEnd - 24 * dpr, bY - 4 * dpr);
+            ctx.fillText('BOS', bXEnd - Math.round(24 * dpr), bY - Math.round(4 * dpr));
           }
 
           // ── 4. Draw CHoCH Lines ──
@@ -496,12 +495,12 @@ class SmcPaneView implements IPrimitivePaneView {
 
             if (y === null || xStart === null || xEnd === null) continue;
 
-            const bY = y * dpr;
-            const bXStart = xStart * dpr;
-            const bXEnd = xEnd * dpr;
+            const bY = Math.round(y * dpr);
+            const bXStart = Math.round(xStart * dpr);
+            const bXEnd = Math.round(xEnd * dpr);
 
             ctx.strokeStyle = item.type === 'bullish' ? '#26a69a' : '#ef5350';
-            ctx.lineWidth = 1.5 * dpr;
+            ctx.lineWidth = Math.max(1, Math.round(1.5 * dpr));
             ctx.setLineDash([]);
             ctx.beginPath();
             ctx.moveTo(bXStart, bY);
@@ -510,8 +509,8 @@ class SmcPaneView implements IPrimitivePaneView {
 
             // Label
             ctx.fillStyle = item.type === 'bullish' ? '#26a69a' : '#ef5350';
-            ctx.font = `bold ${9 * dpr}px sans-serif`;
-            ctx.fillText('CHoCH', bXEnd - 36 * dpr, bY - 4 * dpr);
+            ctx.font = `bold ${Math.round(9 * dpr)}px sans-serif`;
+            ctx.fillText('CHoCH', bXEnd - Math.round(36 * dpr), bY - Math.round(4 * dpr));
           }
 
           ctx.restore();
