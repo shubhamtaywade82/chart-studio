@@ -129,6 +129,7 @@ export class ChartView {
     this.volume = this.engine.volume;
 
     this.ltp = new LtpPlugin();
+    this.ltp.attachEngine(this.engine);
     this.realtimeLine = new RealtimeLinePlugin(this.engine);
     this.activeCandle = new ActiveCandlePlugin(this.engine);
     

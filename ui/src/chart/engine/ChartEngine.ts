@@ -20,14 +20,14 @@ export class ChartEngine {
   public readonly api: IChartApi;
   public readonly series: ISeriesApi<'Candlestick'>;
   public readonly volume: ISeriesApi<'Histogram'>;
-  
+
   public readonly bus = new EventBus();
   public readonly plugins: PluginRuntime;
   public readonly scheduler = new RafScheduler();
-  public readonly motion = new MotionEngine(0.18);
-  
+  public readonly motion = new MotionEngine(0.08);
+
   public theme: CandleTheme = loadCandleTheme();
-  
+
   private resizeObs: ResizeObserver;
   private cachedCandleWidth = 8;
   private candles: Candle[] = [];
@@ -35,7 +35,7 @@ export class ChartEngine {
 
   constructor(container: HTMLElement, options: DeepPartial<ChartOptions>) {
     this.api = createChart(container, options);
-    
+
     // Core Series
     this.series = this.api.addSeries(CandlestickSeries, {
       ...this.theme.options,
@@ -72,10 +72,10 @@ export class ChartEngine {
       if (range) {
         this.updateLayoutCache(range);
         this.bus.emitVisibleRangeChanged({ range, candleWidth: this.cachedCandleWidth });
-        
+
         const atLive = range.to >= this.candles.length - 1;
         this.bus.emitLiveStateChanged(atLive);
-        
+
         // Save scale state
         if (this.candles.length > 0) {
           const candlesVisible = range.to - range.from;
@@ -96,7 +96,7 @@ export class ChartEngine {
 
     // Evaluate physics
     const animatedPrice = this.motion.update(timeMs);
-    
+
     // Auto-suspend the loop if motion is completely at rest
     if (this.motion.getCurrent() === this.motion.getTarget()) {
       this.scheduler.suspendContinuousRender();
@@ -128,7 +128,7 @@ export class ChartEngine {
   public setCandles(candles: Candle[]) {
     const isFirstLoad = this.candles.length === 0 && candles.length > 0;
     this.candles = candles;
-    
+
     if (isFirstLoad) {
       try {
         const saved = localStorage.getItem(this.stateKey);

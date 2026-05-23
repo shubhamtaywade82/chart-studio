@@ -11,6 +11,7 @@ import type {
   Time,
 } from 'lightweight-charts';
 import type { ChartPlugin } from './engine/PluginRuntime';
+import type { ChartEngine } from './engine/ChartEngine';
 
 /**
  * Live-price ("LTP") primitive: draws a dashed horizontal line from the
@@ -29,6 +30,11 @@ export class LtpPlugin implements ChartPlugin, ISeriesPrimitive<Time> {
   private intervalMs = 0;
   private barStartMs = 0;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
+  private engine?: ChartEngine;
+
+  attachEngine(engine: ChartEngine): void {
+    this.engine = engine;
+  }
 
   getPrimitive(): ISeriesPrimitive {
     return this;
@@ -52,6 +58,12 @@ export class LtpPlugin implements ChartPlugin, ISeriesPrimitive<Time> {
 
   onAttached(api: IChartApi, series: ISeriesApi<'Candlestick'>) {
     // optional lifecycle hook
+  }
+
+  onAnimationFrame(timeMs: number): void {
+    if (this.price !== null && this.engine) {
+      this.requestUpdate?.();
+    }
   }
 
   setLtp(price: number | null, color: string, startTime: UTCTimestamp | null): void {
@@ -95,7 +107,8 @@ export class LtpPlugin implements ChartPlugin, ISeriesPrimitive<Time> {
   }
 
   _state(): { chart: IChartApi | null; series: ISeriesApi<SeriesType> | null; price: number | null; color: string; startTime: UTCTimestamp | null } {
-    return { chart: this.chart, series: this.series, price: this.price, color: this.color, startTime: this.startTime };
+    const p = this.engine ? (this.engine.motion.getCurrent() ?? this.price) : this.price;
+    return { chart: this.chart, series: this.series, price: p, color: this.color, startTime: this.startTime };
   }
 }
 
