@@ -1,5 +1,5 @@
 import WebSocket from 'ws';
-import type { TokenProvider } from './token-provider';
+import type { TokenProvider, DhanCreds } from './token-provider';
 import { getIndianMarketStatus } from './market-time';
 
 /**
@@ -249,6 +249,8 @@ export class DhanStreamPool {
   private ws: WebSocket | null = null;
   private readonly subs = new Map<string, InternalSub>(); // key = `${seg}:${secId}`
   private readonly lastTicks = new Map<string, DhanTick>(); // key = `${seg}:${secId}`
+  /** Deduplicates ticks that arrive from both primary and staging during MBB overlap. */
+  private readonly lastExchangeTs = new Map<string, number>(); // key = `${seg}:${secId}`, value = ltt (epoch s)
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private marketCheckTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
@@ -260,6 +262,8 @@ export class DhanStreamPool {
   private lastFrameAt = 0;
   /** Periodic heartbeat tick to detect dead/silent sockets. */
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  /** Staging socket used during Make-Before-Break token rotation. */
+  private pendingMbb: WebSocket | null = null;
   /** Public mode field so callers can verify (e.g. depth requires REQ_FULL). */
   get currentMode(): number { return this.mode; }
 
@@ -267,17 +271,13 @@ export class DhanStreamPool {
     this.mode = mode === 'ticker' ? REQ_TICKER : mode === 'quote' ? REQ_QUOTE : REQ_FULL;
     this.checkMarketHours();
 
-    // Proactive WebSocket rotation: when the token provider rotates the token,
-    // we force a terminate and reconnect to use the fresh creds.
-    this.tokens.onRotate?.(() => {
+    // Make-Before-Break token rotation: establish a secondary socket with the new
+    // creds before tearing down the primary, eliminating the ~1-3s data gap that
+    // a hard terminate would cause.
+    this.tokens.onRotate?.((newCreds: DhanCreds) => {
       if (this.closed) return;
-      console.log('[adapter-dhanhq] token rotated, proactively reconnecting WebSocket');
-      if (this.ws) {
-        try { this.ws.terminate(); } catch { /* noop */ }
-        // The 'close' handler will trigger automatic reconnection.
-      } else {
-        this.ensureConnected();
-      }
+      console.log('[adapter-dhanhq] token rotated, initiating make-before-break rotation');
+      void this.makeBeforeBreak(newCreds);
     });
   }
 
@@ -399,7 +399,7 @@ export class DhanStreamPool {
 
   private async connect(): Promise<void> {
     if (this.closed) return;
-    
+
     // Clear any existing connection if called unexpectedly
     if (this.ws) {
       try { this.ws.terminate(); } catch { /* noop */ }
@@ -437,21 +437,24 @@ export class DhanStreamPool {
       const list: DhanSubscription[] = [...this.subs.values()].map((s) => s.ins);
       if (list.length > 0) {
         console.log(`[adapter-dhanhq] Re-subscribing to ${list.length} instruments on connection open`);
-        this.sendSub(list);
+        this.sendSubToWs(ws, list);
       }
       this.startHeartbeat();
     });
 
+    this.attachHandlers(ws);
+  }
+
+  /**
+   * Attaches the production message/close/error/pong handlers to a socket.
+   * Called for both normal connections and after MBB cutover.
+   */
+  private attachHandlers(ws: WebSocket): void {
     ws.on('pong', () => { this.lastFrameAt = Date.now(); });
 
     ws.on('message', (raw) => {
       if (!(raw instanceof Buffer)) return;
       this.lastFrameAt = Date.now();
-
-      if (raw.length >= 1) {
-        const code = raw.readUInt8(0);
-        // console.log(`[adapter-dhanhq] WebSocket frame received: code=${code}, length=${raw.length} bytes`);
-      }
 
       // Validate header length field if present. Reject obviously truncated frames
       // so we don't read garbage past the buffer end.
@@ -484,8 +487,16 @@ export class DhanStreamPool {
         return;
       }
       const key = `${segStr}:${tick.securityId}`;
-      
-      // Update cache
+
+      // Deduplicate ticks that arrive from both the primary and staging sockets
+      // during an MBB overlap window, using the exchange-side trade timestamp.
+      if (tick.ltt !== undefined) {
+        const lastLtt = this.lastExchangeTs.get(key) ?? 0;
+        if (tick.ltt <= lastLtt) return;
+        this.lastExchangeTs.set(key, tick.ltt);
+      }
+
+      // Update LTP cache
       const existing = this.lastTicks.get(key);
       if (existing) {
         Object.assign(existing, tick);
@@ -521,46 +532,148 @@ export class DhanStreamPool {
     });
   }
 
-  private sendSub(instruments: DhanSubscription[]): void {
-    const send = (): void => {
-      const ws = this.ws;
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  /**
+   * Make-Before-Break token rotation protocol:
+   * 1. Establish a secondary socket with the new token.
+   * 2. Re-subscribe all instruments on the secondary.
+   * 3. Wait for the first valid data tick on the secondary.
+   * 4. Promote secondary to primary; attach production handlers.
+   * 5. Terminate the old primary.
+   *
+   * Ticks arriving from both sockets during the overlap are deduplicated via
+   * lastExchangeTs (exchange-side ltt timestamp).
+   */
+  private async makeBeforeBreak(newCreds: DhanCreds): Promise<void> {
+    if (this.pendingMbb) {
+      console.log('[adapter-dhanhq] MBB already in progress, skipping duplicate rotation');
+      return;
+    }
 
-      // Group instruments by resolved RequestCode.
-      // Indices (IDX_I) do not support Full Feed (RequestCode 21), so they must use Quote (17) or Ticker (15).
-      const groups = new Map<number, DhanSubscription[]>();
-      for (const ins of instruments) {
-        const rc = ins.exchangeSegment.toUpperCase() === 'IDX_I'
-          ? (this.mode === REQ_TICKER ? REQ_TICKER : REQ_QUOTE)
-          : this.mode;
-        let list = groups.get(rc);
-        if (!list) {
-          list = [];
-          groups.set(rc, list);
-        }
-        list.push(ins);
+    const url = `${FEED_BASE}?version=2&token=${encodeURIComponent(newCreds.accessToken)}&clientId=${encodeURIComponent(newCreds.clientId)}&authType=2`;
+    console.log('[adapter-dhanhq] MBB: establishing secondary socket');
+    const staging = new WebSocket(url);
+    this.pendingMbb = staging;
+
+    const fallback = (): void => {
+      this.pendingMbb = null;
+      try { staging.removeAllListeners(); staging.terminate(); } catch { /* noop */ }
+      // Fall back to a hard reconnect so we don't stay on a stale token.
+      if (this.ws) {
+        try { this.ws.terminate(); } catch { /* noop */ }
+      } else {
+        this.ensureConnected();
       }
+    };
 
-      // Send subscription messages for each RequestCode in chunks of 100
-      for (const [rc, list] of groups.entries()) {
-        for (let i = 0; i < list.length; i += 100) {
-          const chunk = list.slice(i, i + 100);
-          const body = {
-            RequestCode: rc,
-            InstrumentCount: chunk.length,
-            InstrumentList: chunk.map((ins) => ({
-              ExchangeSegment: ins.exchangeSegment,
-              SecurityId: ins.securityId,
-            })),
-          };
-          console.log(`[adapter-dhanhq] Subscribing: RequestCode=${rc}, count=${chunk.length}, instruments=${chunk.map(c => `${c.exchangeSegment}:${c.securityId}`).join(',')}`);
-          try { ws.send(JSON.stringify(body)); } catch (err) {
-            console.error('[adapter-dhanhq] Failed to send subscription message', err);
+    const mbbTimeout = setTimeout(() => {
+      console.warn('[adapter-dhanhq] MBB: secondary socket timed out (10s), falling back to hard reconnect');
+      fallback();
+    }, 10_000);
+
+    const onStagingError = (): void => {
+      clearTimeout(mbbTimeout);
+      console.warn('[adapter-dhanhq] MBB: secondary socket error, falling back to hard reconnect');
+      fallback();
+    };
+
+    const onStagingMessage = (raw: WebSocket.RawData): void => {
+      if (!(raw instanceof Buffer)) return;
+      const tick = parseTick(raw);
+      // Wait for the first real data tick (not a disconnect or unparseable frame).
+      if (!tick || tick.code === RESP_DISCONNECT) return;
+
+      clearTimeout(mbbTimeout);
+      this.pendingMbb = null;
+      staging.removeListener('message', onStagingMessage);
+      staging.removeListener('error', onStagingError);
+
+      console.log('[adapter-dhanhq] MBB: secondary socket live — cutting over primary');
+      const oldWs = this.ws;
+
+      // Promote staging to primary before attaching production handlers so that
+      // the close handler's `this.ws !== ws` guard works correctly.
+      this.stopHeartbeat();
+      this.ws = staging;
+      this.reconnectAttempts = 0;
+      this.attachHandlers(staging);
+      this.startHeartbeat();
+
+      // Deliver the first tick that triggered the cutover.
+      const segStr = tick.exchangeSegmentString;
+      if (segStr && !segStr.startsWith('UNKNOWN_')) {
+        const key = `${segStr}:${tick.securityId}`;
+        if (tick.ltt !== undefined) {
+          const lastLtt = this.lastExchangeTs.get(key) ?? 0;
+          if (tick.ltt > lastLtt) {
+            this.lastExchangeTs.set(key, tick.ltt);
+            const entry = this.subs.get(key);
+            if (entry) {
+              for (const fn of entry.fns) fn(tick);
+            }
           }
         }
       }
+
+      // Gracefully close the old primary — its handlers will no-op because
+      // `this.ws !== oldWs` after promotion.
+      if (oldWs) {
+        try { oldWs.removeAllListeners(); oldWs.terminate(); } catch { /* noop */ }
+      }
     };
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) send();
-    else this.ensureConnected();
+
+    staging.once('error', onStagingError);
+    staging.on('message', onStagingMessage);
+
+    staging.once('open', () => {
+      const list = [...this.subs.values()].map(s => s.ins);
+      if (list.length > 0) {
+        this.sendSubToWs(staging, list);
+      }
+    });
+  }
+
+  private sendSub(instruments: DhanSubscription[]): void {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) { this.ensureConnected(); return; }
+    this.sendSubToWs(ws, instruments);
+  }
+
+  /** Sends subscription messages to a specific WebSocket (used by both normal and MBB paths). */
+  private sendSubToWs(ws: WebSocket, instruments: DhanSubscription[]): void {
+    if (ws.readyState !== WebSocket.OPEN) return;
+
+    // Group instruments by resolved RequestCode.
+    // Indices (IDX_I) do not support Full Feed (RequestCode 21), so they must use Quote (17) or Ticker (15).
+    const groups = new Map<number, DhanSubscription[]>();
+    for (const ins of instruments) {
+      const rc = ins.exchangeSegment.toUpperCase() === 'IDX_I'
+        ? (this.mode === REQ_TICKER ? REQ_TICKER : REQ_QUOTE)
+        : this.mode;
+      let list = groups.get(rc);
+      if (!list) {
+        list = [];
+        groups.set(rc, list);
+      }
+      list.push(ins);
+    }
+
+    // Send subscription messages for each RequestCode in chunks of 100
+    for (const [rc, list] of groups.entries()) {
+      for (let i = 0; i < list.length; i += 100) {
+        const chunk = list.slice(i, i + 100);
+        const body = {
+          RequestCode: rc,
+          InstrumentCount: chunk.length,
+          InstrumentList: chunk.map((ins) => ({
+            ExchangeSegment: ins.exchangeSegment,
+            SecurityId: ins.securityId,
+          })),
+        };
+        console.log(`[adapter-dhanhq] Subscribing: RequestCode=${rc}, count=${chunk.length}, instruments=${chunk.map(c => `${c.exchangeSegment}:${c.securityId}`).join(',')}`);
+        try { ws.send(JSON.stringify(body)); } catch (err) {
+          console.error('[adapter-dhanhq] Failed to send subscription message', err);
+        }
+      }
+    }
   }
 }

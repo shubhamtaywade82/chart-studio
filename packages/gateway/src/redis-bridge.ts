@@ -31,6 +31,9 @@ interface ProviderPresence {
   online: boolean;
 }
 
+// Maximum number of cached topics to avoid unbounded growth
+const TOPIC_CACHE_MAX = 2000;
+
 /**
  * Glue between Redis pub/sub topics and gateway consumers:
  *  - keep one upstream pSubscribe per channel pattern (data, presence)
@@ -45,6 +48,8 @@ export class RedisBridge {
   private readonly pendingDiscover = new Map<string, (reply: DiscoverReply) => void>();
   private readonly presenceListeners = new Set<(p: ProviderPresence[]) => void>();
   private readonly rawListeners = new Set<(topic: string, raw: string) => void>();
+  /** Last known envelope per data topic — used to hydrate newly connected clients. */
+  private readonly topicCache = new Map<string, DataEnvelope>();
 
 
   constructor(redisUrl: string) {
@@ -121,6 +126,11 @@ export class RedisBridge {
     };
   }
 
+  /** Returns the last known DataEnvelope for a specific data topic, or undefined if unseen. */
+  getCachedEnvelope(topic: string): DataEnvelope | undefined {
+    return this.topicCache.get(topic);
+  }
+
   /** Register a listener that receives every raw Redis data message. Returns unsub function. */
   listenRaw(listener: (topic: string, raw: string) => void): () => void {
     this.rawListeners.add(listener);
@@ -144,10 +154,19 @@ export class RedisBridge {
     for (const fn of this.rawListeners) {
       try { fn(topic, raw); } catch { /* ignore */ }
     }
-    const set = this.listeners.get(topic);
-    if (!set || set.size === 0) return;
     let env: DataEnvelope;
     try { env = JSON.parse(raw); } catch { return; }
+
+    // Cache the last known state per topic so late-joining clients get immediate state.
+    if (this.topicCache.size >= TOPIC_CACHE_MAX) {
+      // Evict oldest entry when the cache is full.
+      const firstKey = this.topicCache.keys().next().value;
+      if (firstKey !== undefined) this.topicCache.delete(firstKey);
+    }
+    this.topicCache.set(topic, env);
+
+    const set = this.listeners.get(topic);
+    if (!set || set.size === 0) return;
     for (const fn of set) fn(env);
   }
 
