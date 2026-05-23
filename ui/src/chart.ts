@@ -258,6 +258,11 @@ export class ChartView {
         if (data.pairs) this.aiOverlay.applyCorrelation(data.pairs);
         break;
       }
+      case 'strategy_signal': {
+        const data = ann.data as { htfBias?: string };
+        if (data.htfBias) this.aiOverlay.applyHtfBias(data.htfBias);
+        break;
+      }
       default:
         break;
     }

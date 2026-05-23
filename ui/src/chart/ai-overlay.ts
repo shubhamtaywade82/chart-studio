@@ -84,14 +84,27 @@ export class AIOverlayManager {
     return list.includes(time);
   }
 
+  private lastHtfBias: string = 'NEUTRAL';
+  private lastLtfRegime: string = 'UNKNOWN';
+
   // ── 1. Regime color coding ──
   applyRegime(regime: string): void {
     const bg = REGIME_BG[regime] ?? 'transparent';
     this.chart.applyOptions({ layout: { background: { color: bg } } });
+    this.lastLtfRegime = regime.replace(/_/g, ' ').toUpperCase();
+    this.updateRegimeTag();
+  }
+
+  applyHtfBias(bias: string): void {
+    this.lastHtfBias = bias.toUpperCase();
+    this.updateRegimeTag();
+  }
+
+  private updateRegimeTag(): void {
     const tag = document.getElementById('ai-regime-tag');
     if (tag) {
-      tag.textContent = regime.replace(/_/g, ' ').toUpperCase();
-      tag.setAttribute('data-regime', regime);
+      tag.textContent = `HTF ${this.lastHtfBias} / LTF ${this.lastLtfRegime}`;
+      tag.setAttribute('data-regime', this.lastLtfRegime.toLowerCase().replace(/ /g, '_'));
     }
   }
 
