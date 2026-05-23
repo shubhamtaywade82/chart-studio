@@ -10,6 +10,34 @@ import type {
   Time,
 } from 'lightweight-charts';
 import type { Candle } from '../provider-client';
+import { AIOverlayManager } from './ai-overlay';
+
+export interface SMCStructure {
+  type: 'bullish' | 'bearish';
+  price: number;
+  startTime: UTCTimestamp;
+  breakTime: UTCTimestamp;
+  isDisplacement: boolean;
+}
+
+export interface SMCOrderBlock {
+  type: 'bullish' | 'bearish';
+  startTime: UTCTimestamp;
+  priceMin: number;
+  priceMax: number;
+  mitigated: boolean;
+  mitigatedTime?: UTCTimestamp;
+  isOrigin: boolean;
+}
+
+export interface SMCZone {
+  type: 'bullish' | 'bearish';
+  startTime: UTCTimestamp;
+  priceMin: number;
+  priceMax: number;
+  mitigated: boolean;
+  mitigatedTime?: UTCTimestamp;
+}
 
 export class SmcPrimitive implements ISeriesPrimitive<Time> {
   private chart: IChartApi | null = null;
@@ -19,12 +47,16 @@ export class SmcPrimitive implements ISeriesPrimitive<Time> {
 
   // Computed SMC Structures
   swings: Array<{ type: 'high' | 'low'; index: number; price: number; time: UTCTimestamp; broken: boolean }> = [];
-  bos: Array<{ type: 'bullish' | 'bearish'; price: number; startTime: UTCTimestamp; breakTime: UTCTimestamp }> = [];
-  choch: Array<{ type: 'bullish' | 'bearish'; price: number; startTime: UTCTimestamp; breakTime: UTCTimestamp }> = [];
-  orderBlocks: Array<{ type: 'bullish' | 'bearish'; startTime: UTCTimestamp; priceMin: number; priceMax: number; mitigated: boolean; mitigatedTime?: UTCTimestamp }> = [];
-  fvgs: Array<{ type: 'bullish' | 'bearish'; startTime: UTCTimestamp; priceMin: number; priceMax: number; mitigated: boolean; mitigatedTime?: UTCTimestamp }> = [];
+  bos: SMCStructure[] = [];
+  choch: SMCStructure[] = [];
+  orderBlocks: SMCOrderBlock[] = [];
+  fvgs: SMCZone[] = [];
+  sweeps: Array<{ type: 'high' | 'low'; price: number; time: UTCTimestamp }> = [];
+  
+  // Premium/Discount Array
+  pdRange: { high: number; low: number; equilibrium: number } | null = null;
 
-  constructor(private readonly period: number = 5) {}
+  constructor(private readonly overlay: AIOverlayManager, private readonly period: number = 5) {}
 
   attached(param: SeriesAttachedParameter<Time, SeriesType>): void {
     this.chart = param.chart as IChartApi;
@@ -74,12 +106,8 @@ export class SmcPrimitive implements ISeriesPrimitive<Time> {
   }
 
   private calculateSMC(): void {
-    if (this.candles.length < this.period * 2 + 5) {
-      this.swings = [];
-      this.bos = [];
-      this.choch = [];
-      this.orderBlocks = [];
-      this.fvgs = [];
+    if (this.candles.length < this.period * 2 + 10) {
+      this.swings = []; this.bos = []; this.choch = []; this.orderBlocks = []; this.fvgs = []; this.sweeps = [];
       return;
     }
 
@@ -88,434 +116,264 @@ export class SmcPrimitive implements ISeriesPrimitive<Time> {
     const period = this.period;
 
     // 1. Detect Swings (Fractals)
-    const swings: Array<{ type: 'high' | 'low'; index: number; price: number; time: UTCTimestamp; broken: boolean }> = [];
+    const swings: typeof this.swings = [];
     for (let i = period; i < n - period; i++) {
       const c = candles[i]!;
-      
-      // Swing High
-      let isHigh = true;
+      let isHigh = true, isLow = true;
       for (let j = 1; j <= period; j++) {
-        if (candles[i - j]!.high >= c.high || candles[i + j]!.high > c.high) {
-          isHigh = false;
-          break;
-        }
+        if (candles[i - j]!.high >= c.high || candles[i + j]!.high > c.high) isHigh = false;
+        if (candles[i - j]!.low <= c.low || candles[i + j]!.low < c.low) isLow = false;
       }
-      if (isHigh) {
-        swings.push({
-          type: 'high',
-          index: i,
-          price: c.high,
-          time: Math.floor(c.openTime / 1000) as UTCTimestamp,
-          broken: false,
-        });
-      }
+      if (isHigh) swings.push({ type: 'high', index: i, price: c.high, time: Math.floor(c.openTime / 1000) as UTCTimestamp, broken: false });
+      if (isLow) swings.push({ type: 'low', index: i, price: c.low, time: Math.floor(c.openTime / 1000) as UTCTimestamp, broken: false });
+    }
 
-      // Swing Low
-      let isLow = true;
-      for (let j = 1; j <= period; j++) {
-        if (candles[i - j]!.low <= c.low || candles[i + j]!.low < c.low) {
-          isLow = false;
-          break;
-        }
-      }
-      if (isLow) {
-        swings.push({
-          type: 'low',
-          index: i,
-          price: c.low,
-          time: Math.floor(c.openTime / 1000) as UTCTimestamp,
-          broken: false,
-        });
+    // 2. Premium/Discount Range (Last significant High/Low)
+    if (swings.length >= 2) {
+      const lastHigh = [...swings].reverse().find(s => s.type === 'high');
+      const lastLow = [...swings].reverse().find(s => s.type === 'low');
+      if (lastHigh && lastLow) {
+        this.pdRange = { high: lastHigh.price, low: lastLow.price, equilibrium: (lastHigh.price + lastLow.price) / 2 };
       }
     }
 
-    // 2. Detect BOS & CHoCH & Order Blocks
-    const bos: typeof this.bos = [];
-    const choch: typeof this.choch = [];
-    const orderBlocks: typeof this.orderBlocks = [];
-    
+    // 3. Detect BOS/CHoCH with Displacement
+    const bos: SMCStructure[] = [];
+    const choch: SMCStructure[] = [];
+    const orderBlocks: SMCOrderBlock[] = [];
     let trend: 'bullish' | 'bearish' = 'bullish';
 
     for (let i = 0; i < n; i++) {
       const c = candles[i]!;
       const cTime = Math.floor(c.openTime / 1000) as UTCTimestamp;
-
-      // Confirmed swing levels formed up to the current candle index
       const confirmed = swings.filter(s => s.index <= i - period);
-      const activeHighs = confirmed.filter(s => s.type === 'high' && !s.broken);
-      const activeLows = confirmed.filter(s => s.type === 'low' && !s.broken);
+      const activeHigh = confirmed.filter(s => s.type === 'high' && !s.broken).pop();
+      const activeLow = confirmed.filter(s => s.type === 'low' && !s.broken).pop();
 
-      const activeHigh = activeHighs[activeHighs.length - 1];
-      const activeLow = activeLows[activeLows.length - 1];
+      // DISPLACEMENT CHECK: Is the break strong? (Body size > 1.5x average of last 5)
+      const body = Math.abs(c.close - c.open);
+      let avgBody = 0;
+      for (let k = Math.max(0, i - 5); k < i; k++) avgBody += Math.abs(candles[k]!.close - candles[k]!.open);
+      avgBody /= 5;
+      const isDisplaced = body > avgBody * 1.5;
 
       if (trend === 'bullish') {
-        // Bullish BOS (Close breaks Swing High)
         if (activeHigh && c.close > activeHigh.price) {
-          bos.push({
-            type: 'bullish',
-            price: activeHigh.price,
-            startTime: activeHigh.time,
-            breakTime: cTime,
-          });
+          bos.push({ type: 'bullish', price: activeHigh.price, startTime: activeHigh.time, breakTime: cTime, isDisplacement: isDisplaced });
           activeHigh.broken = true;
-
-          // Bullish Order Block (last down-candle before swing low move)
-          let obIdx = activeHigh.index;
-          for (let k = activeHigh.index; k >= Math.max(0, activeHigh.index - 15); k--) {
-            if (candles[k]!.close < candles[k]!.open) {
-              obIdx = k;
-              break;
-            }
-          }
-          const obCandle = candles[obIdx]!;
-          orderBlocks.push({
-            type: 'bullish',
-            startTime: Math.floor(obCandle.openTime / 1000) as UTCTimestamp,
-            priceMin: obCandle.low,
-            priceMax: obCandle.high,
-            mitigated: false,
-          });
+          this.addOrderBlock(orderBlocks, candles, activeHigh.index, 'bullish', true);
         }
-
-        // Bearish CHoCH (Close breaks Swing Low in uptrend)
         if (activeLow && c.close < activeLow.price) {
-          choch.push({
-            type: 'bearish',
-            price: activeLow.price,
-            startTime: activeLow.time,
-            breakTime: cTime,
-          });
+          choch.push({ type: 'bearish', price: activeLow.price, startTime: activeLow.time, breakTime: cTime, isDisplacement: isDisplaced });
           activeLow.broken = true;
           trend = 'bearish';
-
-          // Bearish Order Block (last up-candle before swing high move)
-          let obIdx = activeLow.index;
-          for (let k = activeLow.index; k >= Math.max(0, activeLow.index - 15); k--) {
-            if (candles[k]!.close > candles[k]!.open) {
-              obIdx = k;
-              break;
-            }
-          }
-          const obCandle = candles[obIdx]!;
-          orderBlocks.push({
-            type: 'bearish',
-            startTime: Math.floor(obCandle.openTime / 1000) as UTCTimestamp,
-            priceMin: obCandle.low,
-            priceMax: obCandle.high,
-            mitigated: false,
-          });
+          this.addOrderBlock(orderBlocks, candles, activeLow.index, 'bearish', true);
         }
       } else {
-        // Bearish Trend
-        // Bearish BOS (Close breaks Swing Low)
         if (activeLow && c.close < activeLow.price) {
-          bos.push({
-            type: 'bearish',
-            price: activeLow.price,
-            startTime: activeLow.time,
-            breakTime: cTime,
-          });
+          bos.push({ type: 'bearish', price: activeLow.price, startTime: activeLow.time, breakTime: cTime, isDisplacement: isDisplaced });
           activeLow.broken = true;
-
-          // Bearish OB
-          let obIdx = activeLow.index;
-          for (let k = activeLow.index; k >= Math.max(0, activeLow.index - 15); k--) {
-            if (candles[k]!.close > candles[k]!.open) {
-              obIdx = k;
-              break;
-            }
-          }
-          const obCandle = candles[obIdx]!;
-          orderBlocks.push({
-            type: 'bearish',
-            startTime: Math.floor(obCandle.openTime / 1000) as UTCTimestamp,
-            priceMin: obCandle.low,
-            priceMax: obCandle.high,
-            mitigated: false,
-          });
+          this.addOrderBlock(orderBlocks, candles, activeLow.index, 'bearish', true);
         }
-
-        // Bullish CHoCH (Close breaks Swing High in downtrend)
         if (activeHigh && c.close > activeHigh.price) {
-          choch.push({
-            type: 'bullish',
-            price: activeHigh.price,
-            startTime: activeHigh.time,
-            breakTime: cTime,
-          });
+          choch.push({ type: 'bullish', price: activeHigh.price, startTime: activeHigh.time, breakTime: cTime, isDisplacement: isDisplaced });
           activeHigh.broken = true;
           trend = 'bullish';
-
-          // Bullish OB
-          let obIdx = activeHigh.index;
-          for (let k = activeHigh.index; k >= Math.max(0, activeHigh.index - 15); k--) {
-            if (candles[k]!.close < candles[k]!.open) {
-              obIdx = k;
-              break;
-            }
-          }
-          const obCandle = candles[obIdx]!;
-          orderBlocks.push({
-            type: 'bullish',
-            startTime: Math.floor(obCandle.openTime / 1000) as UTCTimestamp,
-            priceMin: obCandle.low,
-            priceMax: obCandle.high,
-            mitigated: false,
-          });
+          this.addOrderBlock(orderBlocks, candles, activeHigh.index, 'bullish', true);
         }
       }
     }
 
-    // 3. Detect Fair Value Gaps (FVG)
-    const fvgs: typeof this.fvgs = [];
+    // 4. Fair Value Gaps
+    const fvgs: SMCZone[] = [];
     for (let i = 2; i < n; i++) {
-      const cPrev2 = candles[i - 2]!;
-      const cPrev1 = candles[i - 1]!;
-      const c = candles[i]!;
+      const c2 = candles[i - 2]!, c1 = candles[i - 1]!, c = candles[i]!;
+      if (c2.high < c.low) fvgs.push({ type: 'bullish', startTime: Math.floor(c1.openTime / 1000) as UTCTimestamp, priceMin: c2.high, priceMax: c.low, mitigated: false });
+      if (c2.low > c.high) fvgs.push({ type: 'bearish', startTime: Math.floor(c1.openTime / 1000) as UTCTimestamp, priceMin: c.high, priceMax: c2.low, mitigated: false });
+    }
 
-      // Bullish FVG
-      if (cPrev2.high < c.low) {
-        fvgs.push({
-          type: 'bullish',
-          startTime: Math.floor(cPrev1.openTime / 1000) as UTCTimestamp,
-          priceMin: cPrev2.high,
-          priceMax: c.low,
-          mitigated: false,
-        });
+    // 5. Liquidity Sweeps (Manipulation)
+    const sweeps: typeof this.sweeps = [];
+    for (let i = 1; i < n; i++) {
+      const c = candles[i]!, prevC = candles[i - 1]!;
+      const confirmed = swings.filter(s => s.index < i - 1);
+      const lastHigh = confirmed.filter(s => s.type === 'high').pop();
+      const lastLow = confirmed.filter(s => s.type === 'low').pop();
+
+      if (lastHigh && prevC.high > lastHigh.price && prevC.close < lastHigh.price) {
+        sweeps.push({ type: 'high', price: prevC.high, time: Math.floor(prevC.openTime / 1000) as UTCTimestamp });
       }
-
-      // Bearish FVG
-      if (cPrev2.low > c.high) {
-        fvgs.push({
-          type: 'bearish',
-          startTime: Math.floor(cPrev1.openTime / 1000) as UTCTimestamp,
-          priceMin: c.high,
-          priceMax: cPrev2.low,
-          mitigated: false,
-        });
+      if (lastLow && prevC.low < lastLow.price && prevC.close > lastLow.price) {
+        sweeps.push({ type: 'low', price: prevC.low, time: Math.floor(prevC.openTime / 1000) as UTCTimestamp });
       }
     }
 
-    // 4. Trace mitigation for Order Blocks and FVGs
-    for (const ob of orderBlocks) {
-      const startIdx = candles.findIndex(c => Math.floor(c.openTime / 1000) === ob.startTime);
+    // 6. Mitigation Tracing
+    this.traceMitigation(orderBlocks, candles);
+    this.traceMitigation(fvgs, candles);
+
+    this.swings = swings; this.bos = bos; this.choch = choch; this.orderBlocks = orderBlocks; this.fvgs = fvgs; this.sweeps = sweeps;
+  }
+
+  private addOrderBlock(obs: SMCOrderBlock[], candles: Candle[], swingIdx: number, type: 'bullish' | 'bearish', isOrigin: boolean): void {
+    // Find the last opposite candle before the swing move
+    let obIdx = swingIdx;
+    for (let k = swingIdx; k >= Math.max(0, swingIdx - 10); k--) {
+      const c = candles[k]!;
+      if (type === 'bullish' ? c.close < c.open : c.close > c.open) {
+        obIdx = k;
+        break;
+      }
+    }
+    const ob = candles[obIdx]!;
+    obs.push({
+      type, isOrigin,
+      startTime: Math.floor(ob.openTime / 1000) as UTCTimestamp,
+      priceMin: ob.low, priceMax: ob.high,
+      mitigated: false
+    });
+  }
+
+  private traceMitigation(zones: SMCZone[] | SMCOrderBlock[], candles: Candle[]): void {
+    const n = candles.length;
+    for (const z of zones) {
+      const startIdx = candles.findIndex(c => Math.floor(c.openTime / 1000) === z.startTime);
       if (startIdx === -1) continue;
       for (let k = startIdx + 1; k < n; k++) {
         const c = candles[k]!;
-        if (ob.type === 'bullish' && c.low <= ob.priceMin) {
-          ob.mitigated = true;
-          ob.mitigatedTime = Math.floor(c.openTime / 1000) as UTCTimestamp;
-          break;
-        }
-        if (ob.type === 'bearish' && c.high >= ob.priceMax) {
-          ob.mitigated = true;
-          ob.mitigatedTime = Math.floor(c.openTime / 1000) as UTCTimestamp;
+        if ((z.type === 'bullish' && c.low <= z.priceMin) || (z.type === 'bearish' && c.high >= z.priceMax)) {
+          z.mitigated = true;
+          z.mitigatedTime = Math.floor(c.openTime / 1000) as UTCTimestamp;
           break;
         }
       }
     }
-
-    for (const fvg of fvgs) {
-      const startIdx = candles.findIndex(c => Math.floor(c.openTime / 1000) === fvg.startTime);
-      if (startIdx === -1) continue;
-      for (let k = startIdx + 1; k < n; k++) {
-        const c = candles[k]!;
-        if (fvg.type === 'bullish' && c.low <= fvg.priceMin) {
-          fvg.mitigated = true;
-          fvg.mitigatedTime = Math.floor(c.openTime / 1000) as UTCTimestamp;
-          break;
-        }
-        if (fvg.type === 'bearish' && c.high >= fvg.priceMax) {
-          fvg.mitigated = true;
-          fvg.mitigatedTime = Math.floor(c.openTime / 1000) as UTCTimestamp;
-          break;
-        }
-      }
-    }
-
-    this.swings = swings;
-    this.bos = bos;
-    this.choch = choch;
-    this.orderBlocks = orderBlocks;
-    this.fvgs = fvgs;
   }
 }
 
 class SmcPaneView implements IPrimitivePaneView {
   constructor(private readonly p: SmcPrimitive) {}
-
   renderer(): IPrimitivePaneRenderer {
     return {
       draw: (target: any) => {
         const { chart, series, candles } = this.p._state();
         if (!chart || !series || candles.length === 0) return;
-
         const ts = chart.timeScale();
-        const state = this.p;
+        const dpr = window.devicePixelRatio || 1;
 
         target.useBitmapCoordinateSpace((scope: any) => {
           const ctx: CanvasRenderingContext2D = scope.context;
-          const dpr: number = scope.bitmapSize.width / scope.mediaSize.width;
           const bWidth = scope.bitmapSize.width;
-
+          const bHeight = scope.bitmapSize.height;
           ctx.save();
 
-          // Keep the chart readable: only draw unmitigated zones and the most
-          // recent few structure breaks.
-          const MAX_BOS = 3;
-          const MAX_CHOCH = 2;
-          const MAX_FVG = 6;
-          const MAX_OB = 6;
-
-          const lastClose = candles[candles.length - 1]!.close;
-          const minFvgPct = 0.0008; // 0.08% of price — drop fly-specks
-          const validFvgs = state.fvgs
-            .filter((f) => !f.mitigated)
-            .filter((f) => (f.priceMax - f.priceMin) / lastClose >= minFvgPct)
-            .slice(-MAX_FVG);
-          const validObs = state.orderBlocks
-            .filter((o) => !o.mitigated)
-            .slice(-MAX_OB);
-          const validBos = state.bos.slice(-MAX_BOS);
-          const validChoch = state.choch.slice(-MAX_CHOCH);
-
-          // ── 1. Draw FVGs ──
-          for (const fvg of validFvgs) {
-            const yMin = series.priceToCoordinate(fvg.priceMin);
-            const yMax = series.priceToCoordinate(fvg.priceMax);
-            const xStart = ts.timeToCoordinate(fvg.startTime);
-
-            if (yMin === null || yMax === null || xStart === null) continue;
-
-            const xEnd = fvg.mitigated && fvg.mitigatedTime
-              ? ts.timeToCoordinate(fvg.mitigatedTime)
-              : null;
-            
-            const bYMin = Math.round(yMax * dpr);
-            const bYMax = Math.round(yMin * dpr);
-            const bYHeight = bYMax - bYMin;
-            const bXStart = Math.round(xStart * dpr);
-            const bXEnd = xEnd !== null ? Math.round(xEnd * dpr) : bWidth;
-            const bXWidth = bXEnd - bXStart;
-
-            if (bXWidth <= 0 || bYHeight <= 0) continue;
-
-            ctx.fillStyle = fvg.type === 'bullish'
-              ? 'rgba(76, 175, 80, 0.04)'
-              : 'rgba(255, 152, 0, 0.04)';
-            ctx.fillRect(bXStart, bYMin, bXWidth, bYHeight);
-
-            ctx.strokeStyle = fvg.type === 'bullish'
-              ? 'rgba(76, 175, 80, 0.15)'
-              : 'rgba(255, 152, 0, 0.15)';
-            ctx.lineWidth = Math.max(1, Math.floor(dpr));
-            ctx.strokeRect(bXStart, bYMin, bXWidth, bYHeight);
-
-            // Add FVG label
-            ctx.fillStyle = fvg.type === 'bullish' ? '#81c784' : '#ffb74d';
-            ctx.font = `${Math.round(8 * dpr)}px sans-serif`;
-            ctx.fillText('FVG', bXStart + Math.round(4 * dpr), bYMin + Math.round(10 * dpr));
-          }
-
-          // ── 2. Draw Order Blocks ──
-          for (const ob of validObs) {
-            const yMin = series.priceToCoordinate(ob.priceMin);
-            const yMax = series.priceToCoordinate(ob.priceMax);
-            const xStart = ts.timeToCoordinate(ob.startTime);
-
-            if (yMin === null || yMax === null || xStart === null) continue;
-
-            const xEnd = ob.mitigated && ob.mitigatedTime
-              ? ts.timeToCoordinate(ob.mitigatedTime)
-              : null;
-
-            const bYMin = Math.round(yMax * dpr);
-            const bYMax = Math.round(yMin * dpr);
-            const bYHeight = bYMax - bYMin;
-            const bXStart = Math.round(xStart * dpr);
-            const bXEnd = xEnd !== null ? Math.round(xEnd * dpr) : bWidth;
-            const bXWidth = bXEnd - bXStart;
-
-            if (bXWidth <= 0 || bYHeight <= 0) continue;
-
-            const opacityMultiplier = ob.mitigated ? 0.3 : 1.0;
-
-            ctx.fillStyle = ob.type === 'bullish'
-              ? `rgba(38, 166, 154, ${0.12 * opacityMultiplier})`
-              : `rgba(239, 83, 80, ${0.12 * opacityMultiplier})`;
-            ctx.fillRect(bXStart, bYMin, bXWidth, bYHeight);
-
-            ctx.strokeStyle = ob.type === 'bullish'
-              ? `rgba(38, 166, 154, ${0.4 * opacityMultiplier})`
-              : `rgba(239, 83, 80, ${0.4 * opacityMultiplier})`;
-            ctx.lineWidth = Math.max(1, Math.floor(dpr));
-            ctx.strokeRect(bXStart, bYMin, bXWidth, bYHeight);
-
-            // OB label
-            ctx.fillStyle = ob.type === 'bullish' ? '#4db6ac' : '#e57373';
-            ctx.font = `${Math.round(9 * dpr)}px sans-serif`;
-            if (ob.type === 'bullish') {
-              ctx.fillText('OB', bXStart + Math.round(6 * dpr), bYMin + Math.round(12 * dpr));
+          // 1. Draw Premium/Discount Zones
+          if (this.p.pdRange) {
+            const yHigh = series.priceToCoordinate(this.p.pdRange.high);
+            const yLow = series.priceToCoordinate(this.p.pdRange.low);
+            const yMid = series.priceToCoordinate(this.p.pdRange.equilibrium);
+            if (yHigh !== null && yLow !== null && yMid !== null) {
+              // Premium (Reddish)
+              ctx.fillStyle = 'rgba(239, 83, 80, 0.02)';
+              ctx.fillRect(0, Math.round(yHigh * dpr), bWidth, Math.round((yMid - yHigh) * dpr));
+              // Discount (Greenish)
+              ctx.fillStyle = 'rgba(38, 166, 154, 0.02)';
+              ctx.fillRect(0, Math.round(yMid * dpr), bWidth, Math.round((yLow - yMid) * dpr));
+              // Equilibrium line
+              ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+              ctx.setLineDash([5 * dpr, 5 * dpr]);
+              ctx.beginPath();
+              ctx.moveTo(0, Math.round(yMid * dpr));
+              ctx.lineTo(bWidth, Math.round(yMid * dpr));
+              ctx.stroke();
+              ctx.setLineDash([]);
+              ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+              ctx.font = `${Math.round(10 * dpr)}px sans-serif`;
+              ctx.fillText('EQUILIBRIUM (50%)', 10 * dpr, Math.round(yMid * dpr) - 4 * dpr);
             }
           }
 
-          // ── 3. Draw BOS Lines ──
-          for (const item of validBos) {
-            const y = series.priceToCoordinate(item.price);
-            const xStart = ts.timeToCoordinate(item.startTime);
-            const xEnd = ts.timeToCoordinate(item.breakTime);
+          // 2. Draw FVGs
+          this.p.fvgs.filter(f => !f.mitigated).slice(-6).forEach(fvg => {
+            const isFocused = this.p['overlay'].isFocused('fvgs', fvg.startTime);
+            const opacity = isFocused ? 0.04 : 0.01;
 
-            if (y === null || xStart === null || xEnd === null) continue;
+            const yMin = series.priceToCoordinate(fvg.priceMin), yMax = series.priceToCoordinate(fvg.priceMax);
+            const xStart = ts.timeToCoordinate(fvg.startTime);
+            if (yMin !== null && yMax !== null && xStart !== null) {
+              ctx.fillStyle = fvg.type === 'bullish' ? `rgba(76, 175, 80, ${opacity})` : `rgba(255, 152, 0, ${opacity})`;
+              ctx.fillRect(Math.round(xStart * dpr), Math.round(yMax * dpr), bWidth, Math.round((yMin - yMax) * dpr));
+            }
+          });
 
-            const bY = Math.round(y * dpr);
-            const bXStart = Math.round(xStart * dpr);
-            const bXEnd = Math.round(xEnd * dpr);
+          // 3. Draw Order Blocks
+          this.p.orderBlocks.filter(ob => !ob.mitigated).slice(-6).forEach(ob => {
+            const isFocused = this.p['overlay'].isFocused('order_blocks', ob.startTime);
+            const opacity = isFocused ? 0.1 : 0.02;
+            const borderOpacity = isFocused ? 0.3 : 0.08;
 
-            ctx.strokeStyle = item.type === 'bullish' ? '#26a69a' : '#ef5350';
-            ctx.lineWidth = Math.max(1, Math.floor(dpr));
-            const dash = Math.round(4 * dpr);
-            ctx.setLineDash([dash, dash]);
-            ctx.beginPath();
-            ctx.moveTo(bXStart, bY);
-            ctx.lineTo(bXEnd, bY);
-            ctx.stroke();
+            const yMin = series.priceToCoordinate(ob.priceMin), yMax = series.priceToCoordinate(ob.priceMax);
+            const xStart = ts.timeToCoordinate(ob.startTime);
+            if (yMin !== null && yMax !== null && xStart !== null) {
+              ctx.fillStyle = ob.type === 'bullish' ? `rgba(38, 166, 154, ${opacity})` : `rgba(239, 83, 80, ${opacity})`;
+              ctx.strokeStyle = ob.type === 'bullish' ? `rgba(38, 166, 154, ${borderOpacity})` : `rgba(239, 83, 80, ${borderOpacity})`;
+              ctx.fillRect(Math.round(xStart * dpr), Math.round(yMax * dpr), bWidth, Math.round((yMin - yMax) * dpr));
+              ctx.strokeRect(Math.round(xStart * dpr), Math.round(yMax * dpr), bWidth, Math.round((yMin - yMax) * dpr));
+              
+              if (isFocused) {
+                ctx.fillStyle = ob.type === 'bullish' ? '#4db6ac' : '#e57373';
+                ctx.font = `bold ${Math.round(9 * dpr)}px sans-serif`;
+                ctx.fillText(ob.isOrigin ? 'ORIGIN OB' : 'OB', Math.round(xStart * dpr) + 4 * dpr, Math.round(yMax * dpr) + 12 * dpr);
+              }
+            }
+          });
 
-            // Label
-            ctx.fillStyle = item.type === 'bullish' ? '#26a69a' : '#ef5350';
-            ctx.font = `${Math.round(9 * dpr)}px sans-serif`;
-            ctx.setLineDash([]);
-            ctx.fillText('BOS', bXEnd - Math.round(24 * dpr), bY - Math.round(4 * dpr));
-          }
+          // 4. Draw BOS/CHoCH with Displacement markers
+          const drawStruct = (list: SMCStructure[], label: string) => {
+            list.slice(-3).forEach(s => {
+              const y = series.priceToCoordinate(s.price), xS = ts.timeToCoordinate(s.startTime), xE = ts.timeToCoordinate(s.breakTime);
+              if (y !== null && xS !== null && xE !== null) {
+                ctx.strokeStyle = s.type === 'bullish' ? '#26a69a' : '#ef5350';
+                ctx.setLineDash(label === 'BOS' ? [4*dpr, 4*dpr] : []);
+                ctx.beginPath(); ctx.moveTo(Math.round(xS * dpr), Math.round(y * dpr)); ctx.lineTo(Math.round(xE * dpr), Math.round(y * dpr)); ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = ctx.strokeStyle;
+                ctx.font = `${s.isDisplacement ? 'bold ' : ''}${Math.round(10 * dpr)}px sans-serif`;
+                ctx.fillText(`${label}${s.isDisplacement ? ' ⚡' : ''}`, Math.round(xS * dpr) + (Math.round(xE * dpr) - Math.round(xS * dpr))/2 - 10*dpr, Math.round(y * dpr) - 4*dpr);
+              }
+            });
+          };
+          drawStruct(this.p.bos, 'BOS');
+          drawStruct(this.p.choch, 'CHoCH');
 
-          // ── 4. Draw CHoCH Lines ──
-          for (const item of validChoch) {
-            const y = series.priceToCoordinate(item.price);
-            const xStart = ts.timeToCoordinate(item.startTime);
-            const xEnd = ts.timeToCoordinate(item.breakTime);
+          // 5. Draw Sweeps (X markers)
+          this.p.sweeps.slice(-5).forEach(s => {
+            const isFocused = this.p['overlay'].isFocused('sweeps', s.time);
+            const opacity = isFocused ? 1.0 : 0.2;
 
-            if (y === null || xStart === null || xEnd === null) continue;
-
-            const bY = Math.round(y * dpr);
-            const bXStart = Math.round(xStart * dpr);
-            const bXEnd = Math.round(xEnd * dpr);
-
-            ctx.strokeStyle = item.type === 'bullish' ? '#26a69a' : '#ef5350';
-            ctx.lineWidth = Math.max(1, Math.round(1.5 * dpr));
-            ctx.setLineDash([]);
-            ctx.beginPath();
-            ctx.moveTo(bXStart, bY);
-            ctx.lineTo(bXEnd, bY);
-            ctx.stroke();
-
-            // Label
-            ctx.fillStyle = item.type === 'bullish' ? '#26a69a' : '#ef5350';
-            ctx.font = `bold ${Math.round(9 * dpr)}px sans-serif`;
-            ctx.fillText('CHoCH', bXEnd - Math.round(36 * dpr), bY - Math.round(4 * dpr));
-          }
+            const x = ts.timeToCoordinate(s.time), y = series.priceToCoordinate(s.price);
+            if (x !== null && y !== null) {
+              ctx.strokeStyle = `rgba(124, 77, 255, ${opacity})`;
+              ctx.lineWidth = 2 * dpr;
+              const size = 6 * dpr;
+              ctx.beginPath();
+              ctx.moveTo(Math.round(x * dpr) - size, Math.round(y * dpr) - size);
+              ctx.lineTo(Math.round(x * dpr) + size, Math.round(y * dpr) + size);
+              ctx.moveTo(Math.round(x * dpr) + size, Math.round(y * dpr) - size);
+              ctx.lineTo(Math.round(x * dpr) - size, Math.round(y * dpr) + size);
+              ctx.stroke();
+              
+              if (isFocused) {
+                ctx.fillStyle = '#7c4dff';
+                ctx.font = `bold ${Math.round(9 * dpr)}px sans-serif`;
+                ctx.fillText('SWEEP', Math.round(x * dpr) - 15 * dpr, Math.round(y * dpr) - 10 * dpr);
+              }
+            }
+          });
 
           ctx.restore();
         });
-      },
+      }
     };
   }
 }

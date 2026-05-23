@@ -157,7 +157,7 @@ export class AlertSystem {
   }
 
   private addAlert(message: string, type: Alert['type']): void {
-    const id = genId();
+    const id = Math.random().toString(36).slice(2);
     const alert: Alert = { id, message, type, timestamp: Date.now() };
     this.alerts.unshift(alert);
     if (this.alerts.length > 20) this.alerts.pop();

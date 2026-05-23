@@ -28,8 +28,11 @@ export async function narrate(
     : `OI: ${t.openInterest}, Change: ${d.oiChange}`;
 
   const prompt = `You are a senior prop desk trader specializing in ${marketType}. 
-Write ONE terse sentence (< 25 words) commenting on the current market state. 
+Write ONE educational yet professional trading sentence (< 35 words) commenting on the current market state. 
 You MUST start your sentence with exactly one of these three tags: [LONG ONLY], [SHORT ONLY], or [AVOID] to indicate the current trading bias.
+
+EDUCATIONAL MANDATE: Briefly explain the institutional logic behind the observation using SMC terminology (e.g., Liquidity Sweeps, Displacement, Mitigation, Premium/Discount, or Order Flow). 
+Goal: The user should learn "WHY" the smart money is moving while getting a "READY" signal.
 NO emojis. Use institutional language.
 
 Context:
@@ -43,8 +46,8 @@ One sentence:`;
   const text = await ollama.generate({
     model: NARRATIVE_MODEL,
     prompt,
-    temperature: 0.2,
-    numPredict: 80,
+    temperature: 0.25,
+    numPredict: 100,
     timeoutMs: process.env.OLLAMA_MODE === 'cloud' ? 20_000 : 4_000,
   });
 

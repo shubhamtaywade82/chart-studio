@@ -56,6 +56,7 @@ const parseHash = (): AppState | null => {
 const writeHash = (s: AppState): void => {
   const target = `#${s.provider}:${s.symbol}@${s.interval}`;
   if (location.hash !== target) location.hash = target;
+  localStorage.setItem('ui-active-state', JSON.stringify(s));
 };
 
 const main = (): void => {
@@ -235,20 +236,26 @@ const main = (): void => {
   // Sidebar tab switching
   const sidebarTabs = document.querySelectorAll<HTMLButtonElement>('.sidebar-tab[data-tab]');
   const sidebarPanes = document.querySelectorAll<HTMLElement>('.sidebar-tab-pane[data-tab-pane]');
-  sidebarTabs.forEach((tab) => {
-    tab.addEventListener('click', () => {
-      const target = tab.dataset.tab;
-      sidebarTabs.forEach((t) => {
-        const on = t === tab;
-        t.classList.toggle('active', on);
-        t.setAttribute('aria-selected', on ? 'true' : 'false');
-      });
-      sidebarPanes.forEach((p) => {
-        const on = p.dataset.tabPane === target;
-        p.classList.toggle('is-active', on);
-        if (on) p.removeAttribute('aria-hidden'); else p.setAttribute('aria-hidden', 'true');
-      });
+  const setSidebarTab = (target: string | undefined) => {
+    if (!target) return;
+    sidebarTabs.forEach((t) => {
+      const on = t.dataset.tab === target;
+      t.classList.toggle('active', on);
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
     });
+    sidebarPanes.forEach((p) => {
+      const on = p.dataset.tabPane === target;
+      p.classList.toggle('is-active', on);
+      if (on) p.removeAttribute('aria-hidden'); else p.setAttribute('aria-hidden', 'true');
+    });
+    localStorage.setItem('ui-sidebar-tab', target);
+  };
+  
+  const savedSidebarTab = localStorage.getItem('ui-sidebar-tab');
+  if (savedSidebarTab) setSidebarTab(savedSidebarTab);
+
+  sidebarTabs.forEach((tab) => {
+    tab.addEventListener('click', () => setSidebarTab(tab.dataset.tab));
   });
 
   // Settings modal tab switching
@@ -260,18 +267,70 @@ const main = (): void => {
     indicators: 'Indicators & Overlays',
     system: 'System',
   };
-  settingsNavItems.forEach((nav) => {
-    nav.addEventListener('click', () => {
-      const target = nav.dataset.settingsTab!;
-      settingsNavItems.forEach((n) => {
-        const on = n === nav;
-        n.classList.toggle('active', on);
-        n.setAttribute('aria-selected', on ? 'true' : 'false');
-      });
-      settingsPanes.forEach((p) => p.classList.toggle('active', p.id === `tab-pane-${target}`));
-      if (settingsTitle) settingsTitle.textContent = tabTitles[target] ?? 'Settings';
+  
+  const setSettingsTab = (target: string | undefined) => {
+    if (!target) return;
+    settingsNavItems.forEach((n) => {
+      const on = n.dataset.settingsTab === target;
+      n.classList.toggle('active', on);
+      n.setAttribute('aria-selected', on ? 'true' : 'false');
     });
+    settingsPanes.forEach((p) => p.classList.toggle('active', p.id === `tab-pane-${target}`));
+    if (settingsTitle) settingsTitle.textContent = tabTitles[target] ?? 'Settings';
+    localStorage.setItem('ui-settings-tab', target);
+  };
+
+  const savedSettingsTab = localStorage.getItem('ui-settings-tab');
+  if (savedSettingsTab) setSettingsTab(savedSettingsTab);
+
+  settingsNavItems.forEach((nav) => {
+    nav.addEventListener('click', () => setSettingsTab(nav.dataset.settingsTab));
   });
+
+  const indicatorHost = document.getElementById('indicator-picker-host');
+  if (indicatorHost) {
+    const toggles = [
+      { key: 'showDayOpen', label: 'Day Open (DO)' },
+      { key: 'showDayHigh', label: 'Day High (DH)' },
+      { key: 'showDayLow', label: 'Day Low (DL)' },
+      { key: 'showPrevClose', label: 'Previous Close' },
+      { key: 'showAtp', label: 'Average Traded Price (ATP)' },
+    ];
+    
+    // Load saved states
+    let savedAnalytics = {} as Record<string, boolean>;
+    try {
+      const raw = localStorage.getItem('ui-analytics-toggles');
+      if (raw) savedAnalytics = JSON.parse(raw);
+    } catch { /* ignore */ }
+
+    // Apply saved state to chart
+    const analytics = chart.getAnalytics();
+    if (analytics) {
+      Object.assign(analytics.options, savedAnalytics);
+    }
+
+    indicatorHost.innerHTML = toggles.map(t => {
+      const isChecked = savedAnalytics[t.key] !== false; // true by default
+      return `
+      <label style="display:flex; align-items:center; gap:8px; margin-bottom:8px; cursor:pointer;">
+        <input type="checkbox" id="toggle-${t.key}" ${isChecked ? 'checked' : ''} />
+        <span>${t.label}</span>
+      </label>
+    `}).join('');
+
+    toggles.forEach(t => {
+      document.getElementById(`toggle-${t.key}`)?.addEventListener('change', (e) => {
+        const checked = (e.target as HTMLInputElement).checked;
+        if (analytics) {
+          (analytics.options as any)[t.key] = checked;
+          analytics.forceRedraw();
+        }
+        savedAnalytics[t.key] = checked;
+        localStorage.setItem('ui-analytics-toggles', JSON.stringify(savedAnalytics));
+      });
+    });
+  }
 
   // ── Topbar interval bar ─────────────────────────────────────────────
   const renderIntervals = (): void => {
@@ -515,16 +574,28 @@ const main = (): void => {
     const tryBootstrap = (): void => {
       if (bootstrapped) return;
       const providers = settings.providers();
-      const online = providers.find((p) => p.online);
-      if (!online) return;
-      bootstrapped = true;
-      const defaultSymbol = online.provider.startsWith('binance') ? 'BTCUSDT' : null;
-      if (defaultSymbol) {
-        applyState({ provider: online.provider, symbol: defaultSymbol, interval: '1m' });
+      let initial = parseHash();
+      if (!initial) {
+        try {
+          const saved = localStorage.getItem('ui-active-state');
+          if (saved) initial = JSON.parse(saved);
+        } catch { /* ignore */ }
+      }
+      if (initial) {
+        applyState(initial);
+        bootstrapped = true;
       } else {
-        hdrSymbol.textContent = `Press ⌘K to search ${online.displayName}`;
-        hdrVenue.textContent = online.provider.toUpperCase();
-        renderIntervals();
+        const online = providers.find((p) => p.online);
+        if (!online) return;
+        bootstrapped = true;
+        const defaultSymbol = online.provider.startsWith('binance') ? 'BTCUSDT' : null;
+        if (defaultSymbol) {
+          applyState({ provider: online.provider, symbol: defaultSymbol, interval: '1m' });
+        } else {
+          hdrSymbol.textContent = `Press ⌘K to search ${online.displayName}`;
+          hdrVenue.textContent = online.provider.toUpperCase();
+          renderIntervals();
+        }
       }
     };
     void settings.refresh().then(tryBootstrap);

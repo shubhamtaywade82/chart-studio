@@ -38,6 +38,15 @@ export class AnalyticsRenderer {
   private buyInit = false;
   private oiInit = false;
   private lastOptionLineUpdate = 0;
+  private lastState: AnalyticsState | null = null;
+
+  public options = {
+    showDayOpen: true,
+    showDayHigh: true,
+    showDayLow: true,
+    showPrevClose: true,
+    showAtp: true,
+  };
 
   constructor(private chart: IChartApi, private mainSeries: ISeriesApi<'Candlestick'>) {}
 
@@ -166,20 +175,28 @@ export class AnalyticsRenderer {
   }
 
   update(state: AnalyticsState): void {
+    this.lastState = state;
     // ATP deviation
-    if (this.atpSeries && state.atp > 0) {
-      const deviation = ((state.ltp - state.atp) / state.atp) * 100;
-      let color = '#ffffff';
-      if (deviation > 0.1) color = '#f6465d';
-      else if (deviation < -0.1) color = '#2ebd85';
+    if (this.atpSeries) {
+      if (this.options.showAtp) {
+        this.atpSeries.applyOptions({ visible: true });
+        if (state.atp > 0) {
+          const deviation = ((state.ltp - state.atp) / state.atp) * 100;
+          let color = '#ffffff';
+          if (deviation > 0.1) color = '#f6465d';
+          else if (deviation < -0.1) color = '#2ebd85';
 
-      this.atpSeries.update({ time: state.time, value: state.atp });
+          this.atpSeries.update({ time: state.time, value: state.atp });
 
-      // Update LTP label color based on ATP deviation
-      const ltpLabel = document.querySelector('[data-atp-dev]') as HTMLElement | null;
-      if (ltpLabel) {
-        ltpLabel.setAttribute('data-atp-dev', deviation.toFixed(3));
-        ltpLabel.style.setProperty('--atp-color', color);
+          // Update LTP label color based on ATP deviation
+          const ltpLabel = document.querySelector('[data-atp-dev]') as HTMLElement | null;
+          if (ltpLabel) {
+            ltpLabel.setAttribute('data-atp-dev', deviation.toFixed(3));
+            ltpLabel.style.setProperty('--atp-color', color);
+          }
+        }
+      } else {
+        this.atpSeries.applyOptions({ visible: false });
       }
     }
 
@@ -218,17 +235,32 @@ export class AnalyticsRenderer {
     this.updateDayLevels(state);
   }
 
+  forceRedraw(): void {
+    if (this.lastState) {
+      this.update(this.lastState);
+    }
+  }
+
   /** Tracks the last price set per key, to skip no-op recreations. */
   private dayLevelLastPrice = new Map<string, number>();
 
   private updateDayLevels(state: AnalyticsState): void {
-    const updateLine = (key: string, price: number, color: string, title: string): void => {
+    const updateLine = (key: string, price: number, color: string, title: string, show: boolean): void => {
+      const existing = this.dayLevelLines.get(key);
+      if (!show) {
+        if (existing) {
+          try { this.mainSeries.removePriceLine(existing); } catch { /* noop */ }
+          this.dayLevelLines.delete(key);
+          this.dayLevelLastPrice.delete(key);
+        }
+        return;
+      }
+
       const prev = this.dayLevelLastPrice.get(key);
-      if (prev === price && this.dayLevelLines.has(key)) return;
+      if (prev === price && existing) return;
 
       // Remove existing line if present, then recreate. PriceLine.applyOptions
       // is not reliable across lightweight-charts versions, so we always recreate.
-      const existing = this.dayLevelLines.get(key);
       if (existing) {
         try { this.mainSeries.removePriceLine(existing); } catch { /* noop */ }
       }
@@ -237,10 +269,10 @@ export class AnalyticsRenderer {
       this.dayLevelLastPrice.set(key, price);
     };
 
-    if (state.dayOpen > 0) updateLine('do', state.dayOpen, '#ffffff', 'DO');
-    if (state.dayHigh > 0) updateLine('dh', state.dayHigh, '#26a69a', 'DH');
-    if (state.dayLow > 0) updateLine('dl', state.dayLow, '#ef5350', 'DL');
-    if (state.prevClose && state.prevClose > 0) updateLine('pc', state.prevClose, '#9c9c9c', 'Prev');
+    updateLine('do', state.dayOpen, '#ffffff', 'DO', this.options.showDayOpen && state.dayOpen > 0);
+    updateLine('dh', state.dayHigh, '#26a69a', 'DH', this.options.showDayHigh && state.dayHigh > 0);
+    updateLine('dl', state.dayLow, '#ef5350', 'DL', this.options.showDayLow && state.dayLow > 0);
+    updateLine('pc', state.prevClose ?? 0, '#9c9c9c', 'Prev', this.options.showPrevClose && !!state.prevClose && state.prevClose > 0);
   }
 
   /**

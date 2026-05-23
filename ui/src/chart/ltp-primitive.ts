@@ -10,13 +10,17 @@ import type {
   UTCTimestamp,
   Time,
 } from 'lightweight-charts';
+import type { ChartPlugin } from './engine/PluginRuntime';
+import type { ChartEngine } from './engine/ChartEngine';
 
 /**
  * Live-price ("LTP") primitive: draws a dashed horizontal line from the
  * latest bar's right edge to the chart's right edge, plus a colored
  * label on the price axis. Implemented against the v5 ISeriesPrimitive API.
  */
-export class LtpPrimitive implements ISeriesPrimitive<Time> {
+export class LtpPlugin implements ChartPlugin, ISeriesPrimitive<Time> {
+  public readonly id = 'ltp';
+
   private chart: IChartApi | null = null;
   private series: ISeriesApi<SeriesType> | null = null;
   private price: number | null = null;
@@ -26,6 +30,15 @@ export class LtpPrimitive implements ISeriesPrimitive<Time> {
   private intervalMs = 0;
   private barStartMs = 0;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
+  private engine?: ChartEngine;
+
+  attachEngine(engine: ChartEngine): void {
+    this.engine = engine;
+  }
+
+  getPrimitive(): ISeriesPrimitive {
+    return this;
+  }
 
   attached(param: SeriesAttachedParameter<Time, SeriesType>): void {
     this.chart = param.chart as IChartApi;
@@ -41,6 +54,16 @@ export class LtpPrimitive implements ISeriesPrimitive<Time> {
     this.series = null;
     this.requestUpdate = null;
     if (this.tickTimer) { clearInterval(this.tickTimer); this.tickTimer = null; }
+  }
+
+  onAttached(api: IChartApi, series: ISeriesApi<'Candlestick'>) {
+    // optional lifecycle hook
+  }
+
+  onAnimationFrame(timeMs: number): void {
+    if (this.price !== null && this.engine) {
+      this.requestUpdate?.();
+    }
   }
 
   setLtp(price: number | null, color: string, startTime: UTCTimestamp | null): void {
@@ -84,12 +107,13 @@ export class LtpPrimitive implements ISeriesPrimitive<Time> {
   }
 
   _state(): { chart: IChartApi | null; series: ISeriesApi<SeriesType> | null; price: number | null; color: string; startTime: UTCTimestamp | null } {
-    return { chart: this.chart, series: this.series, price: this.price, color: this.color, startTime: this.startTime };
+    const p = this.engine ? (this.engine.motion.getCurrent() ?? this.price) : this.price;
+    return { chart: this.chart, series: this.series, price: p, color: this.color, startTime: this.startTime };
   }
 }
 
 class LtpPaneView implements IPrimitivePaneView {
-  constructor(private readonly p: LtpPrimitive) {}
+  constructor(private readonly p: LtpPlugin) {}
 
   renderer(): IPrimitivePaneRenderer {
     return {
@@ -142,7 +166,7 @@ class LtpPaneView implements IPrimitivePaneView {
 }
 
 class LtpPriceAxisView implements ISeriesPrimitiveAxisView {
-  constructor(private readonly p: LtpPrimitive) {}
+  constructor(private readonly p: LtpPlugin) {}
 
   coordinate(): number {
     const { series, price } = this.p._state();
@@ -168,7 +192,7 @@ class LtpPriceAxisView implements ISeriesPrimitiveAxisView {
 }
 
 class LtpCountdownAxisView implements ISeriesPrimitiveAxisView {
-  constructor(private readonly p: LtpPrimitive) {}
+  constructor(private readonly p: LtpPlugin) {}
 
   coordinate(): number {
     const { series, price } = this.p._state();

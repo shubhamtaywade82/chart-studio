@@ -18,8 +18,10 @@ import {
 } from 'lightweight-charts';
 import type { Candle } from './provider-client';
 import { CANDLE_THEMES, loadCandleTheme, saveCandleTheme, type CandleTheme } from './chart/candle-themes';
-import { LtpPrimitive } from './chart/ltp-primitive';
-import { SmoothPriceAnimator } from './chart/smooth-price';
+import { LtpPlugin } from './chart/ltp-primitive';
+import { RealtimeLinePlugin } from './chart/plugins/realtime-line/RealtimeLinePrimitive';
+import { ActiveCandlePlugin } from './chart/plugins/active-candle/ActiveCandlePrimitive';
+import { ChartEngine } from './chart/engine/ChartEngine';
 import { vwap } from './indicators/math';
 import {
   SMA, EMA, RSI, BollingerBands, MACD, ATR, ADX, Stochastic, CCI, OBV, MFI, Supertrend, IchimokuCloud
@@ -40,6 +42,7 @@ interface AIAnnotationData {
 }
 
 export class ChartView {
+  public engine: ChartEngine;
   private _api: IChartApi;
   private series: ISeriesApi<'Candlestick'>;
   private volume: ISeriesApi<'Histogram'>;
@@ -51,12 +54,16 @@ export class ChartView {
   public getApi(): IChartApi {
     return this._api;
   }
-  private ltp: LtpPrimitive;
-  private ltpAnimator: SmoothPriceAnimator;
+  
+  private ltp: LtpPlugin;
+  private realtimeLine: RealtimeLinePlugin;
+  private activeCandle: ActiveCandlePlugin;
+  
   private candles: Candle[] = [];
   private theme: CandleTheme = loadCandleTheme();
+  
   private precision: number = 2;
-  private resizeObs: ResizeObserver;
+  private cachedCandleWidth = 8;
   private markersPlugin?: any;
   private crosshairListeners = new Set<(c: CrosshairInfo | null) => void>();
   private liveListeners = new Set<(atLive: boolean) => void>();
@@ -78,7 +85,7 @@ export class ChartView {
   private bidLine: IPriceLine | null = null;
 
   constructor(container: HTMLElement) {
-    this._api = createChart(container, {
+    this.engine = new ChartEngine(container, {
       width: container.clientWidth,
       height: container.clientHeight,
       layout: {
@@ -91,60 +98,44 @@ export class ChartView {
         },
       },
       grid: {
-        vertLines: { color: 'rgba(255, 255, 255, 0.04)' },
-        horzLines: { color: 'rgba(255, 255, 255, 0.04)' },
-      },
-      timeScale: {
-        timeVisible: true,
-        secondsVisible: false,
-        borderColor: 'rgba(255, 255, 255, 0.08)',
-        rightOffset: 12,
-        barSpacing: 10,
-      },
-      rightPriceScale: {
-        borderColor: 'rgba(255, 255, 255, 0.08)',
-        autoScale: true,
-        alignLabels: true,
+        vertLines: { color: 'rgba(255, 255, 255, 0.03)', style: LineStyle.Dashed },
+        horzLines: { color: 'rgba(255, 255, 255, 0.03)', style: LineStyle.Dashed },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: {
-          color: 'rgba(255, 255, 255, 0.2)',
-          width: 1,
-          style: LineStyle.LargeDashed,
-          labelBackgroundColor: '#131722',
-        },
-        horzLine: {
-          color: 'rgba(255, 255, 255, 0.2)',
-          width: 1,
-          style: LineStyle.LargeDashed,
-          labelBackgroundColor: '#131722',
+        vertLine: { width: 1, color: 'rgba(255, 255, 255, 0.2)', style: LineStyle.Dashed, labelBackgroundColor: '#1E222D' },
+        horzLine: { width: 1, color: 'rgba(255, 255, 255, 0.2)', style: LineStyle.Dashed, labelBackgroundColor: '#1E222D' },
+      },
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: true,
+        borderVisible: false,
+        rightOffset: 8,
+        barSpacing: 8,
+        tickMarkFormatter: (time: UTCTimestamp) => {
+          const d = new Date(time * 1000);
+          return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
         },
       },
-      autoSize: false,
+      rightPriceScale: {
+        borderVisible: false,
+        scaleMargins: { top: 0.1, bottom: 0.2 },
+        alignLabels: true,
+      },
     });
 
-    this.series = this._api.addSeries(CandlestickSeries, {
-      ...this.theme.options,
-      priceLineVisible: true,
-      priceLineStyle: LineStyle.Dashed,
-      lastValueVisible: true,
-    });
+    this._api = this.engine.api;
+    this.series = this.engine.series;
+    this.volume = this.engine.volume;
 
-    this.volume = this._api.addSeries(HistogramSeries, {
-      priceFormat: { type: 'volume' },
-      color: 'rgba(255, 255, 255, 0.18)',
-      priceScaleId: 'volume',
-    }, 0);
-
-    this._api.priceScale('volume').applyOptions({
-      scaleMargins: { top: 0.8, bottom: 0 },
-    });
-
-    this.ltp = new LtpPrimitive();
-    this.series.attachPrimitive(this.ltp);
-
-    this.ltpAnimator = new SmoothPriceAnimator(0.01, (p) => this.onSmoothPriceUpdate(p));
+    this.ltp = new LtpPlugin();
+    this.ltp.attachEngine(this.engine);
+    this.realtimeLine = new RealtimeLinePlugin(this.engine);
+    this.activeCandle = new ActiveCandlePlugin(this.engine);
+    
+    this.engine.registerPlugin(this.ltp);
+    this.engine.registerPlugin(this.realtimeLine);
+    this.engine.registerPlugin(this.activeCandle);
 
     const pane0 = this._api.panes()[0];
     if (pane0) {
@@ -153,14 +144,19 @@ export class ChartView {
       });
     }
 
-    this.resizeObs = new ResizeObserver(() => {
-      this._api.resize(container.clientWidth, container.clientHeight);
-    });
-    this.resizeObs.observe(container);
-
     this._api.subscribeClick((p) => this.handleClick(p));
     this._api.subscribeCrosshairMove((p) => this.handleCrosshair(p));
-    this._api.timeScale().subscribeVisibleLogicalRangeChange((r) => this.handleRangeChange(r));
+
+    this.engine.bus.onVisibleRangeChanged(({ range }) => {
+      this.handleRangeChange(range);
+    });
+
+    this.engine.bus.onLiveStateChanged((atLive) => {
+      if (atLive !== this.atLive) {
+        this.atLive = atLive;
+        for (const fn of this.liveListeners) fn(atLive);
+      }
+    });
 
     this.analytics = new AnalyticsRenderer(this._api, this.series);
     this.analytics.setupAtpSeries();
@@ -175,6 +171,10 @@ export class ChartView {
     this.depthHeatmap = new DepthHeatmap();
     this.volumeProfile = new VolumeProfilePanel();
     this.aiOverlay = new AIOverlayManager(this._api, this.series, container);
+  }
+
+  public getAnalytics(): AnalyticsRenderer | null {
+    return this.analytics;
   }
 
   /** Day open ms timestamp used to extrapolate expected volume. */
@@ -207,12 +207,13 @@ export class ChartView {
     if (!ann || !ann.kind) return;
     switch (ann.kind) {
       case 'tactical': {
-        const data = ann.data as { regime?: string; levels?: AILevelUI[]; setup?: TradeSetupUI; divergences?: Array<{ type: string; strength: number; description: string }>; narrative?: string; urgency?: Urgency };
+        const data = ann.data as { focus_components?: any, regime?: string; levels?: AILevelUI[]; setup?: TradeSetupUI; divergences?: Array<{ type: string; strength: number; description: string }>; narrative?: string; urgency?: Urgency };
         if (data.regime) this.aiOverlay.applyRegime(data.regime);
         if (data.levels) this.aiOverlay.applyLevels(data.levels);
         if (data.setup) this.aiOverlay.applySetup(data.setup);
         if (data.divergences) this.aiOverlay.applyDivergences(data.divergences);
         if (data.narrative) this.aiOverlay.applyNarrative(data.narrative, data.urgency ?? 'watch_only');
+        if (data.focus_components) this.aiOverlay.applyFocus(data.focus_components);
         break;
       }
       case 'reflex': {
@@ -310,8 +311,9 @@ export class ChartView {
     for (const c of history) map.set(c.openTime, c);
 
     this.candles = Array.from(map.values()).sort((a, b) => a.openTime - b.openTime);
+    this.engine.setCandles(this.candles);
     
-    this.ltpAnimator.reset();
+    this.engine.motion.reset();
     const last = this.candles[this.candles.length - 1];
     if (last) {
       this.lastUpdatedTime = Math.floor(last.openTime / 1000) as UTCTimestamp;
@@ -326,7 +328,6 @@ export class ChartView {
       }
     }
     const tickSize = 1 / Math.pow(10, precision);
-    this.ltpAnimator.setTickSize(tickSize);
 
     this.series.applyOptions({
       priceFormat: {
@@ -336,9 +337,10 @@ export class ChartView {
       },
     });
 
-    const cs = this.candles.map((c) => ({
+    const cs = this.candles.map((c, i) => ({
       time: Math.floor(c.openTime / 1000) as UTCTimestamp,
       open: c.open, high: c.high, low: c.low, close: c.close,
+      ...(i === this.candles.length - 1 ? { color: 'rgba(0,0,0,0)', wickColor: 'rgba(0,0,0,0)', borderColor: 'rgba(0,0,0,0)' } : {})
     }));
     const vs = this.candles.map((c) => ({
       time: Math.floor(c.openTime / 1000) as UTCTimestamp,
@@ -377,25 +379,69 @@ export class ChartView {
     }
   }
 
+  private lastSeriesUpdateTs = 0;
+
   updateCandle(c: Candle): void {
     const t = Math.floor(c.openTime / 1000) as UTCTimestamp;
+    if (Number.isNaN(t)) return;
+
+    // Check if we actually need a native update before mutating state
+    const last = this.candles[this.candles.length - 1];
+    const isLiveUpdate = last && c.openTime === last.openTime;
+    let needsNativeUpdate = true;
     
-    // Always update internal state.
+    if (isLiveUpdate) {
+      const boundsChanged = c.high !== last.high || c.low !== last.low;
+      const now = Date.now();
+      const timeSinceLastUpdate = now - this.lastSeriesUpdateTs;
+      
+      // Update natively if bounds expanded, or at most 5 times a second (200ms throttle)
+      // to keep volume and scales reasonably up to date without choking the main thread.
+      if (!boundsChanged && timeSinceLastUpdate < 200) {
+        needsNativeUpdate = false;
+      }
+    }
+
+    // Always update internal state for primitives immediately.
     this.updateCandleState(c);
 
     // Lightweight charts: update() can only add a new bar or update the LATEST one.
     // If t < lastUpdatedTime, it's an out-of-order update (e.g. sealed bar arrived late).
     if (!this.lastUpdatedTime || t >= this.lastUpdatedTime) {
-      try {
-        this.series.update({ time: t, open: c.open, high: c.high, low: c.low, close: c.close });
-        this.volume.update({
-          time: t,
-          value: c.volume,
-          color: c.close >= c.open ? (this.theme.volumeUp ?? 'rgba(46, 189, 133, 0.35)') : (this.theme.volumeDown ?? 'rgba(246, 70, 93, 0.35)'),
-        });
-        this.lastUpdatedTime = t;
-      } catch (e) {
-        console.warn('[chart] failed to update bar', e);
+      if (needsNativeUpdate) {
+        try {
+          // If a new bar started, finalize the PREVIOUS one first (reset its visibility).
+          if (this.lastUpdatedTime && t > this.lastUpdatedTime) {
+            const prevIndex = this.candles.findIndex(x => Math.floor(x.openTime / 1000) === this.lastUpdatedTime);
+            const prev = prevIndex >= 0 ? this.candles[prevIndex] : null;
+            if (prev) {
+              this.series.update({
+                time: this.lastUpdatedTime,
+                open: prev.open, high: prev.high, low: prev.low, close: prev.close,
+                color: undefined, wickColor: undefined, borderColor: undefined
+              });
+            }
+          }
+
+          // The most recent candle in state is always rendered "hidden" (transparent) 
+          // because the Animator/Motion engine draws the visual representation.
+          const isLatestInState = c.openTime === this.candles[this.candles.length - 1]?.openTime;
+          const colorOpts = isLatestInState
+            ? { color: 'rgba(0,0,0,0)', wickColor: 'rgba(0,0,0,0)', borderColor: 'rgba(0,0,0,0)' } 
+            : { color: undefined, wickColor: undefined, borderColor: undefined };
+          
+          this.series.update({ time: t, open: c.open, high: c.high, low: c.low, close: c.close, ...colorOpts });
+          this.volume.update({
+            time: t,
+            value: c.volume,
+            color: c.close >= c.open ? (this.theme.volumeUp ?? 'rgba(46, 189, 133, 0.35)') : (this.theme.volumeDown ?? 'rgba(246, 70, 93, 0.35)'),
+          });
+          
+          this.lastUpdatedTime = t;
+          this.lastSeriesUpdateTs = Date.now();
+        } catch (e) {
+          console.warn('[chart] failed to update bar', e);
+        }
       }
     } else {
       // Historical or late update: refresh entire series to show the finalized previous bar.
@@ -403,10 +449,10 @@ export class ChartView {
     }
 
     // Visual smoothness for the live bar.
-    const last = this.candles[this.candles.length - 1];
-    if (last && c.openTime === last.openTime) {
-      this.ltpAnimator.snapTo(c.close);
-      this.onSmoothPriceUpdate(this.ltpAnimator.getPrice() || c.close);
+    const currentLast = this.candles[this.candles.length - 1];
+    if (currentLast && c.openTime === currentLast.openTime) {
+      this.engine.motion.setTarget(c.close);
+      this.engine.scheduler.requestContinuousRender();
     }
 
     for (const smc of this.smcPrimitives) {
@@ -415,9 +461,10 @@ export class ChartView {
   }
 
   private refreshChartData(): void {
-    const cs = this.candles.map((c) => ({
+    const cs = this.candles.map((c, i) => ({
       time: Math.floor(c.openTime / 1000) as UTCTimestamp,
       open: c.open, high: c.high, low: c.low, close: c.close,
+      ...(i === this.candles.length - 1 ? { color: 'rgba(0,0,0,0)', wickColor: 'rgba(0,0,0,0)', borderColor: 'rgba(0,0,0,0)' } : {})
     }));
     const vs = this.candles.map((c) => ({
       time: Math.floor(c.openTime / 1000) as UTCTimestamp,
@@ -437,14 +484,21 @@ export class ChartView {
 
     // Interval rollover: create a new candle when the current interval expires.
     if (this.intervalMs > 0 && last && currentTime >= last.openTime + this.intervalMs) {
-      this.ltpAnimator.flush();
       const newOpenTime = Math.floor(currentTime / this.intervalMs) * this.intervalMs;
       const newCandle: Candle = { openTime: newOpenTime, open: price, high: price, low: price, close: price, volume: qty ?? 0 };
       const t = Math.floor(newOpenTime / 1000) as UTCTimestamp;
 
       if (!this.lastUpdatedTime || t >= this.lastUpdatedTime) {
         try {
-          this.series.update({ time: t, open: price, high: price, low: price, close: price });
+          // Finalize previous bar if rollover
+          if (this.lastUpdatedTime && t > this.lastUpdatedTime) {
+            const prevT = Math.floor(last.openTime / 1000) as UTCTimestamp;
+            if (prevT === this.lastUpdatedTime) {
+              this.series.update({ time: prevT, open: last.open, high: last.high, low: last.low, close: last.close, color: undefined, wickColor: undefined, borderColor: undefined });
+            }
+          }
+
+          this.series.update({ time: t, open: price, high: price, low: price, close: price, color: 'rgba(0,0,0,0)', wickColor: 'rgba(0,0,0,0)', borderColor: 'rgba(0,0,0,0)' });
           this.volume.update({
             time: t,
             value: newCandle.volume,
@@ -456,7 +510,8 @@ export class ChartView {
         }
       }
       this.updateCandleState(newCandle);
-      this.ltpAnimator.snapTo(price);
+      this.engine.motion.setTarget(price);
+      this.engine.scheduler.requestContinuousRender();
       return;
     }
 
@@ -482,7 +537,7 @@ export class ChartView {
       const t = Math.floor(openTime / 1000) as UTCTimestamp;
       if (!this.lastUpdatedTime || t >= this.lastUpdatedTime) {
         try {
-          this.series.update({ time: t, open: price, high: price, low: price, close: price });
+          this.series.update({ time: t, open: price, high: price, low: price, close: price, color: 'rgba(0,0,0,0)', wickColor: 'rgba(0,0,0,0)', borderColor: 'rgba(0,0,0,0)' });
           this.volume.update({
             time: t,
             value: newCandle.volume,
@@ -497,43 +552,22 @@ export class ChartView {
     }
 
     // drive visual smoothness via animator.
-    this.ltpAnimator.snapTo(price);
-  }
-
-  private onSmoothPriceUpdate(animatedPrice: number): void {
-    const last = this.candles[this.candles.length - 1];
-    if (!last) return;
-    const t = Math.floor(last.openTime / 1000) as UTCTimestamp;
-
-    // Safety guard: never push a timestamp older than what the series last saw.
-    if (this.lastUpdatedTime !== null && t < this.lastUpdatedTime) {
-      const color = animatedPrice >= last.open ? '#2ebd85' : '#f6465d';
-      this.ltp.setLtp(animatedPrice, color, null);
-      return;
+    this.engine.motion.setTarget(price);
+    this.engine.scheduler.requestContinuousRender();
+    
+    // update LTP
+    if (last) {
+      const color = price >= last.open ? '#2ebd85' : '#f6465d';
+      const t = Math.floor(last.openTime / 1000) as UTCTimestamp;
+      this.ltp.setLtp(price, color, t);
+      if (this.intervalMs > 0) this.ltp.setBarTiming(this.intervalMs, last.openTime);
     }
-
-    try {
-      // Visual only update; does not advance lastUpdatedTime so subsequent frames
-      // for the same bar can continue to update it.
-      this.series.update({ time: t, open: last.open, high: last.high, low: last.low, close: animatedPrice });
-
-      this.volume.update({
-        time: t,
-        value: last.volume,
-        color: animatedPrice >= last.open ? (this.theme.volumeUp ?? 'rgba(46, 189, 133, 0.6)') : (this.theme.volumeDown ?? 'rgba(246, 70, 93, 0.6)'),
-      });
-    } catch (e) {
-      console.warn('[chart] animation update skipped', e);
-    }
-
-    const color = animatedPrice >= last.open ? '#2ebd85' : '#f6465d';
-    this.ltp.setLtp(animatedPrice, color, t);
-    if (this.intervalMs > 0) this.ltp.setBarTiming(this.intervalMs, last.openTime);
   }
 
   clearLastTradePrice(): void {
     this.candles = [];
-    this.ltpAnimator.reset();
+    this.engine.setCandles(this.candles);
+    this.engine.motion.reset();
     this.lastUpdatedTime = null;
     this.ltp.setLtp(null, '#2ebd85', null);
     if (this.askLine) { try { this.series.removePriceLine(this.askLine); } catch {} this.askLine = null; }
@@ -670,6 +704,19 @@ export class ChartView {
 
   getLatencyStats() {
     return this.latencyMonitor.getStats();
+  }
+
+  public applyTheme(theme: CandleTheme): void {
+    this.engine.applyTheme(theme);
+    
+    // Update Indicators
+    for (const instances of this.indicatorSeries.values()) {
+      for (const inst of instances) {
+        if ('color' in inst.options()) {
+          inst.applyOptions({ color: theme.options.upColor || '#2ebd85' });
+        }
+      }
+    }
   }
 
   updateVolumeProfile(price: number, qty: number): void {
@@ -922,13 +969,12 @@ export class ChartView {
         }
         case 'SMC': {
           const [period = 5] = ind.params;
-          const smc = new SmcPrimitive(period);
+          const smc = new SmcPrimitive(this.aiOverlay, period);
           smc.setCandles(this.candles);
           this.series.attachPrimitive(smc);
           this.smcPrimitives.add(smc);
           break;
-        }
-        default:
+        }        default:
           break;
       }
 
@@ -1110,8 +1156,20 @@ export class ChartView {
 
   private handleClick(_p: MouseEventParams): void { /* reserved */ }
 
+  private updateCandleWidth(range?: LogicalRange | null): void {
+    const timeScale = this._api.timeScale();
+    const visibleRange = range || timeScale.getVisibleLogicalRange();
+    if (visibleRange && visibleRange.to > visibleRange.from) {
+      const barSpacing = timeScale.width() / (visibleRange.to - visibleRange.from);
+      let cw = Math.max(1, Math.floor(barSpacing * 0.75));
+      if (cw % 2 !== 0 && cw > 1) cw += 1;
+      this.cachedCandleWidth = cw;
+    }
+  }
+
   private handleRangeChange(range: LogicalRange | null): void {
     if (!range) return;
+    this.updateCandleWidth(range);
     const atLive = range.to >= this.candles.length - 1;
     if (atLive !== this.atLive) {
       this.atLive = atLive;
@@ -1137,9 +1195,11 @@ export class ChartView {
     const fresh = older.filter((c) => !existing.has(c.openTime));
     if (fresh.length === 0) return;
     this.candles = [...fresh, ...this.candles].sort((a, b) => a.openTime - b.openTime);
-    const cs = this.candles.map((c) => ({
+    this.engine.setCandles(this.candles);
+    const cs = this.candles.map((c, i) => ({
       time: Math.floor(c.openTime / 1000) as UTCTimestamp,
       open: c.open, high: c.high, low: c.low, close: c.close,
+      ...(i === this.candles.length - 1 ? { color: 'rgba(0,0,0,0)', wickColor: 'rgba(0,0,0,0)', borderColor: 'rgba(0,0,0,0)' } : {})
     }));
     const vs = this.candles.map((c) => ({
       time: Math.floor(c.openTime / 1000) as UTCTimestamp,
@@ -1151,12 +1211,17 @@ export class ChartView {
     for (const smc of this.smcPrimitives) smc.setCandles(this.candles);
   }
 
+  public setCandles(candles: Candle[], intervalMs: number = 0): void {
+    this.candles = candles;
+    this.engine.setCandles(candles);
+    this.intervalMs = intervalMs;
+    this.refreshChartData();
+    for (const smc of this.smcPrimitives) smc.setCandles(candles);
+  }
+
   dispose(): void {
-    this.ltpAnimator.reset();
-    this.resizeObs.disconnect();
-    // Detach LTP primitive so its requestUpdate callback can't fire on a
-    // disposed chart.
-    try { this.series.detachPrimitive(this.ltp); } catch { /* noop */ }
+    this.engine.destroy();
+    this.engine.unregisterPlugin(this.ltp.id);
     this.analytics?.reset();
     this.alertSystem.reset();
     this.latencyMonitor.reset();
