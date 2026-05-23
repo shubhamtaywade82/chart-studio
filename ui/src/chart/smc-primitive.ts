@@ -10,6 +10,7 @@ import type {
   Time,
 } from 'lightweight-charts';
 import type { Candle } from '../provider-client';
+import { AIOverlayManager } from './ai-overlay';
 
 export interface SMCStructure {
   type: 'bullish' | 'bearish';
@@ -50,11 +51,12 @@ export class SmcPrimitive implements ISeriesPrimitive<Time> {
   choch: SMCStructure[] = [];
   orderBlocks: SMCOrderBlock[] = [];
   fvgs: SMCZone[] = [];
+  sweeps: Array<{ type: 'high' | 'low'; price: number; time: UTCTimestamp }> = [];
   
   // Premium/Discount Array
   pdRange: { high: number; low: number; equilibrium: number } | null = null;
 
-  constructor(private readonly period: number = 5) {}
+  constructor(private readonly overlay: AIOverlayManager, private readonly period: number = 5) {}
 
   attached(param: SeriesAttachedParameter<Time, SeriesType>): void {
     this.chart = param.chart as IChartApi;
@@ -105,7 +107,7 @@ export class SmcPrimitive implements ISeriesPrimitive<Time> {
 
   private calculateSMC(): void {
     if (this.candles.length < this.period * 2 + 10) {
-      this.swings = []; this.bos = []; this.choch = []; this.orderBlocks = []; this.fvgs = [];
+      this.swings = []; this.bos = []; this.choch = []; this.orderBlocks = []; this.fvgs = []; this.sweeps = [];
       return;
     }
 
@@ -190,11 +192,27 @@ export class SmcPrimitive implements ISeriesPrimitive<Time> {
       if (c2.low > c.high) fvgs.push({ type: 'bearish', startTime: Math.floor(c1.openTime / 1000) as UTCTimestamp, priceMin: c.high, priceMax: c2.low, mitigated: false });
     }
 
-    // 5. Mitigation Tracing
+    // 5. Liquidity Sweeps (Manipulation)
+    const sweeps: typeof this.sweeps = [];
+    for (let i = 1; i < n; i++) {
+      const c = candles[i]!, prevC = candles[i - 1]!;
+      const confirmed = swings.filter(s => s.index < i - 1);
+      const lastHigh = confirmed.filter(s => s.type === 'high').pop();
+      const lastLow = confirmed.filter(s => s.type === 'low').pop();
+
+      if (lastHigh && prevC.high > lastHigh.price && prevC.close < lastHigh.price) {
+        sweeps.push({ type: 'high', price: prevC.high, time: Math.floor(prevC.openTime / 1000) as UTCTimestamp });
+      }
+      if (lastLow && prevC.low < lastLow.price && prevC.close > lastLow.price) {
+        sweeps.push({ type: 'low', price: prevC.low, time: Math.floor(prevC.openTime / 1000) as UTCTimestamp });
+      }
+    }
+
+    // 6. Mitigation Tracing
     this.traceMitigation(orderBlocks, candles);
     this.traceMitigation(fvgs, candles);
 
-    this.swings = swings; this.bos = bos; this.choch = choch; this.orderBlocks = orderBlocks; this.fvgs = fvgs;
+    this.swings = swings; this.bos = bos; this.choch = choch; this.orderBlocks = orderBlocks; this.fvgs = fvgs; this.sweeps = sweeps;
   }
 
   private addOrderBlock(obs: SMCOrderBlock[], candles: Candle[], swingIdx: number, type: 'bullish' | 'bearish', isOrigin: boolean): void {
@@ -277,26 +295,36 @@ class SmcPaneView implements IPrimitivePaneView {
 
           // 2. Draw FVGs
           this.p.fvgs.filter(f => !f.mitigated).slice(-6).forEach(fvg => {
+            const isFocused = this.p['overlay'].isFocused('fvgs', fvg.startTime);
+            const opacity = isFocused ? 0.04 : 0.01;
+
             const yMin = series.priceToCoordinate(fvg.priceMin), yMax = series.priceToCoordinate(fvg.priceMax);
             const xStart = ts.timeToCoordinate(fvg.startTime);
             if (yMin !== null && yMax !== null && xStart !== null) {
-              ctx.fillStyle = fvg.type === 'bullish' ? 'rgba(76, 175, 80, 0.04)' : 'rgba(255, 152, 0, 0.04)';
+              ctx.fillStyle = fvg.type === 'bullish' ? `rgba(76, 175, 80, ${opacity})` : `rgba(255, 152, 0, ${opacity})`;
               ctx.fillRect(Math.round(xStart * dpr), Math.round(yMax * dpr), bWidth, Math.round((yMin - yMax) * dpr));
             }
           });
 
           // 3. Draw Order Blocks
           this.p.orderBlocks.filter(ob => !ob.mitigated).slice(-6).forEach(ob => {
+            const isFocused = this.p['overlay'].isFocused('order_blocks', ob.startTime);
+            const opacity = isFocused ? 0.1 : 0.02;
+            const borderOpacity = isFocused ? 0.3 : 0.08;
+
             const yMin = series.priceToCoordinate(ob.priceMin), yMax = series.priceToCoordinate(ob.priceMax);
             const xStart = ts.timeToCoordinate(ob.startTime);
             if (yMin !== null && yMax !== null && xStart !== null) {
-              ctx.fillStyle = ob.type === 'bullish' ? 'rgba(38, 166, 154, 0.1)' : 'rgba(239, 83, 80, 0.1)';
-              ctx.strokeStyle = ob.type === 'bullish' ? 'rgba(38, 166, 154, 0.3)' : 'rgba(239, 83, 80, 0.3)';
+              ctx.fillStyle = ob.type === 'bullish' ? `rgba(38, 166, 154, ${opacity})` : `rgba(239, 83, 80, ${opacity})`;
+              ctx.strokeStyle = ob.type === 'bullish' ? `rgba(38, 166, 154, ${borderOpacity})` : `rgba(239, 83, 80, ${borderOpacity})`;
               ctx.fillRect(Math.round(xStart * dpr), Math.round(yMax * dpr), bWidth, Math.round((yMin - yMax) * dpr));
               ctx.strokeRect(Math.round(xStart * dpr), Math.round(yMax * dpr), bWidth, Math.round((yMin - yMax) * dpr));
-              ctx.fillStyle = ob.type === 'bullish' ? '#4db6ac' : '#e57373';
-              ctx.font = `bold ${Math.round(9 * dpr)}px sans-serif`;
-              ctx.fillText(ob.isOrigin ? 'ORIGIN OB' : 'OB', Math.round(xStart * dpr) + 4 * dpr, Math.round(yMax * dpr) + 12 * dpr);
+              
+              if (isFocused) {
+                ctx.fillStyle = ob.type === 'bullish' ? '#4db6ac' : '#e57373';
+                ctx.font = `bold ${Math.round(9 * dpr)}px sans-serif`;
+                ctx.fillText(ob.isOrigin ? 'ORIGIN OB' : 'OB', Math.round(xStart * dpr) + 4 * dpr, Math.round(yMax * dpr) + 12 * dpr);
+              }
             }
           });
 
@@ -317,6 +345,31 @@ class SmcPaneView implements IPrimitivePaneView {
           };
           drawStruct(this.p.bos, 'BOS');
           drawStruct(this.p.choch, 'CHoCH');
+
+          // 5. Draw Sweeps (X markers)
+          this.p.sweeps.slice(-5).forEach(s => {
+            const isFocused = this.p['overlay'].isFocused('sweeps', s.time);
+            const opacity = isFocused ? 1.0 : 0.2;
+
+            const x = ts.timeToCoordinate(s.time), y = series.priceToCoordinate(s.price);
+            if (x !== null && y !== null) {
+              ctx.strokeStyle = `rgba(124, 77, 255, ${opacity})`;
+              ctx.lineWidth = 2 * dpr;
+              const size = 6 * dpr;
+              ctx.beginPath();
+              ctx.moveTo(Math.round(x * dpr) - size, Math.round(y * dpr) - size);
+              ctx.lineTo(Math.round(x * dpr) + size, Math.round(y * dpr) + size);
+              ctx.moveTo(Math.round(x * dpr) + size, Math.round(y * dpr) - size);
+              ctx.lineTo(Math.round(x * dpr) - size, Math.round(y * dpr) + size);
+              ctx.stroke();
+              
+              if (isFocused) {
+                ctx.fillStyle = '#7c4dff';
+                ctx.font = `bold ${Math.round(9 * dpr)}px sans-serif`;
+                ctx.fillText('SWEEP', Math.round(x * dpr) - 15 * dpr, Math.round(y * dpr) - 10 * dpr);
+              }
+            }
+          });
 
           ctx.restore();
         });

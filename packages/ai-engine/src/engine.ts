@@ -165,13 +165,35 @@ export class PropDeskAI {
     this.correlation.observe(env.symbol, data.ltp);
 
     // ── 1. Reflex layer — every tick ──
-    const sig = reflex(snap, state.prevSnap ?? undefined);
+    // Find a correlated price to check for SMT Divergence
+    let correlatedPrice: number | undefined;
+    const allSyms = this.correlation.symbols();
+    if (allSyms.length > 1) {
+      let bestCorr = 0;
+      for (const other of allSyms) {
+        if (other === env.symbol) continue;
+        const c = this.correlation.correlation(env.symbol, other);
+        if (c !== null && Math.abs(c) > 0.7 && Math.abs(c) > bestCorr) {
+          bestCorr = Math.abs(c);
+          const otherSeries = (this.correlation as any).series.get(other);
+          if (otherSeries && otherSeries.length > 0) {
+            correlatedPrice = otherSeries[otherSeries.length - 1].price;
+          }
+        }
+      }
+    }
+
+    const sig = reflex(snap, state.prevSnap ?? undefined, correlatedPrice);
     if (sig.urgency !== 'none') {
       const dedupeKey = `${sig.type}:${Math.floor(env.ts / 5000)}`;
       if (dedupeKey !== state.lastReflexKey) {
         state.lastReflexKey = dedupeKey;
         await this.publishSignal(env.provider, env.symbol, sig);
       }
+    }
+
+    if (state.prevSnap) {
+      (state.prevSnap as any).correlatedPrice = correlatedPrice;
     }
 
     // Always publish the live derived snapshot for the UI gauges.

@@ -207,12 +207,13 @@ export class ChartView {
     if (!ann || !ann.kind) return;
     switch (ann.kind) {
       case 'tactical': {
-        const data = ann.data as { regime?: string; levels?: AILevelUI[]; setup?: TradeSetupUI; divergences?: Array<{ type: string; strength: number; description: string }>; narrative?: string; urgency?: Urgency };
+        const data = ann.data as { focus_components?: any, regime?: string; levels?: AILevelUI[]; setup?: TradeSetupUI; divergences?: Array<{ type: string; strength: number; description: string }>; narrative?: string; urgency?: Urgency };
         if (data.regime) this.aiOverlay.applyRegime(data.regime);
         if (data.levels) this.aiOverlay.applyLevels(data.levels);
         if (data.setup) this.aiOverlay.applySetup(data.setup);
         if (data.divergences) this.aiOverlay.applyDivergences(data.divergences);
         if (data.narrative) this.aiOverlay.applyNarrative(data.narrative, data.urgency ?? 'watch_only');
+        if (data.focus_components) this.aiOverlay.applyFocus(data.focus_components);
         break;
       }
       case 'reflex': {
@@ -968,13 +969,12 @@ export class ChartView {
         }
         case 'SMC': {
           const [period = 5] = ind.params;
-          const smc = new SmcPrimitive(period);
+          const smc = new SmcPrimitive(this.aiOverlay, period);
           smc.setCandles(this.candles);
           this.series.attachPrimitive(smc);
           this.smcPrimitives.add(smc);
           break;
-        }
-        default:
+        }        default:
           break;
       }
 

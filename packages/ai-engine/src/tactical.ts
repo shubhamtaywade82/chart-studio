@@ -38,35 +38,22 @@ function buildTacticalPrompt(s: MicrostructureSnapshot): string {
     `T:${new Date(x.openTime).toISOString().slice(11, 19)} O:${x.open} H:${x.high} L:${x.low} C:${x.close} V:${x.volume}`,
   ).join('\n');
 
-  return `You are a senior prop desk trader analyzing Indian F&O markets.
-You have access to microstructure data unavailable to retail traders.
+  return `You are a senior prop desk trader analyzing Indian F&O and Crypto markets.
+You have access to microstructure data and calculated SMC components.
 
 CURRENT MARKET STATE:
 Symbol: ${s.symbol}
 Time: ${new Date(s.timestamp).toISOString()}
 Price: ${t.ltp} | ATP: ${t.atp} | Deviation: ${(d.vwapDeviation * 100).toFixed(3)}%
-Day Range: ${t.dayLow} - ${t.dayHigh}
-OI: ${t.openInterest} (change vs prev: ${d.oiChange})
-Volume: ${t.volume}
-Cumulative Buy Qty: ${t.totalBuyQty} | Sell Qty: ${t.totalSellQty} | CVD (per-tick accum): ${d.cvd}
-Depth Imbalance: ${(d.depthImbalance * 100).toFixed(1)}%
-Toxicity (VPIN-style 0..1): ${d.toxicity.toFixed(2)}
-Volatility regime: ${d.volatilityRegime} | Trade intensity: ${d.tradeIntensity.toFixed(1)} ticks/sec
-
-LAST 5 CANDLES:
-${recent}
-
-TOP 3 DEPTH LEVELS:
-Bids: ${JSON.stringify(t.bids.slice(0, 3))}
-Asks: ${JSON.stringify(t.asks.slice(0, 3))}
+OI: ${t.openInterest} (change: ${d.oiChange}) | CVD: ${d.cvd}
+Depth Imbalance: ${(d.depthImbalance * 100).toFixed(1)}% | Toxicity: ${d.toxicity.toFixed(2)}
 
 INSTRUCTION:
-Analyze this as a senior prop desk trader would. Identify:
-1. Market regime (accumulation, distribution, trending-up, trending-down, breakout, failed_breakout, range-bound)
-2. Key structural levels with confidence 0..1
-3. Divergences (price vs OI, price vs CVD, price vs ATP)
-4. Trade setup if any, with entry, stop, target, sizing
-5. Invalidation: what would invalidate this in the next 3 candles?
+1. Identify Market Regime.
+2. Select FOCUS COMPONENTS: From the available SMC data, identify exactly which Order Blocks, FVGs, or Sweeps are high-priority "Confluence Zones". 
+   - Rule: Only focus on components that align with your trade setup or current institutional bias.
+   - Purpose: To hide "chart noise" for the user.
+3. Define Trade Setup and Invalidation.
 
 Respond ONLY with JSON matching this schema:
 {
@@ -75,20 +62,25 @@ Respond ONLY with JSON matching this schema:
   "levels": [{"price": number, "type": "support|resistance|poc|invalidation", "confidence": number, "rationale": string}],
   "divergences": [{"type": "price-oi|price-cvd|price-atp", "strength": number, "description": string}],
   "setup": {"exists": boolean, "direction": "long|short|none", "entry": number, "stop": number, "target": number, "confidence": number, "riskReward": number, "positionSizePct": number, "rationale": string, "invalidation": string},
+  "focus_components": {
+    "order_blocks": ["ISO_TIMESTAMP_OF_CANDLE"],
+    "fvgs": ["ISO_TIMESTAMP_OF_CANDLE"],
+    "sweeps": ["ISO_TIMESTAMP_OF_CANDLE"]
+  },
   "narrative": string,
   "urgency": "immediate|this_candle|next_5min|watch_only"
 }`;
 }
 
-function sanitize(t: Omit<TacticalAnalysis, 'layer' | 'ts'>): Omit<TacticalAnalysis, 'layer' | 'ts'> {
-  const levels: AILevel[] = (t.levels ?? []).filter((l) => Number.isFinite(l?.price) && l.price > 0).map((l) => ({
+function sanitize(t: any): Omit<TacticalAnalysis, 'layer' | 'ts'> {
+  const levels: AILevel[] = (t.levels ?? []).filter((l: any) => Number.isFinite(l?.price) && l.price > 0).map((l: any) => ({
     price: l.price,
     type: l.type ?? 'support',
     confidence: clamp01(l.confidence ?? 0.5),
     rationale: String(l.rationale ?? ''),
   })).slice(0, 6);
 
-  const divergences: AIDivergence[] = (t.divergences ?? []).filter(Boolean).map((d) => ({
+  const divergences: AIDivergence[] = (t.divergences ?? []).filter(Boolean).map((d: any) => ({
     type: d.type ?? 'price-cvd',
     strength: clamp(d.strength ?? 0, -1, 1),
     description: String(d.description ?? ''),
@@ -99,12 +91,19 @@ function sanitize(t: Omit<TacticalAnalysis, 'layer' | 'ts'>): Omit<TacticalAnaly
     confidence: 0, riskReward: 0, positionSizePct: 0, rationale: '', invalidation: '',
   };
 
+  const focus: TacticalAnalysis['focus_components'] = {
+    order_blocks: Array.isArray(t.focus_components?.order_blocks) ? t.focus_components.order_blocks.map((ts: string) => Math.floor(new Date(ts).getTime() / 1000)) : [],
+    fvgs: Array.isArray(t.focus_components?.fvgs) ? t.focus_components.fvgs.map((ts: string) => Math.floor(new Date(ts).getTime() / 1000)) : [],
+    sweeps: Array.isArray(t.focus_components?.sweeps) ? t.focus_components.sweeps.map((ts: string) => Math.floor(new Date(ts).getTime() / 1000)) : [],
+  };
+
   return {
     regime: t.regime ?? 'range-bound',
     regimeConfidence: clamp01(t.regimeConfidence ?? 0.5),
     levels,
     divergences,
     setup,
+    focus_components: focus,
     narrative: String(t.narrative ?? ''),
     urgency: t.urgency ?? 'watch_only',
   };

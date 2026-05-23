@@ -32,6 +32,12 @@ export interface TradeSetup {
   invalidation: string;
 }
 
+export interface FocusComponents {
+  order_blocks?: UTCTimestamp[];
+  fvgs?: UTCTimestamp[];
+  sweeps?: UTCTimestamp[];
+}
+
 const REGIME_BG: Record<string, string> = {
   'accumulation': 'rgba(76, 175, 80, 0.03)',
   'distribution': 'rgba(244, 67, 54, 0.03)',
@@ -49,6 +55,7 @@ const REGIME_BG: Record<string, string> = {
 export class AIOverlayManager {
   private levelLines = new Map<string, ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']>>();
   private setupLines: Array<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']>> = [];
+  private focus: FocusComponents = {};
 
   constructor(private chart: IChartApi, private series: ISeriesApi<'Candlestick'>, private container: HTMLElement) {
     this.ensurePanels();
@@ -63,7 +70,18 @@ export class AIOverlayManager {
       try { this.series.removePriceLine(line); } catch { /* noop */ }
     }
     this.setupLines = [];
+    this.focus = {};
     this.hideTradeCard();
+  }
+
+  applyFocus(focus: FocusComponents): void {
+    this.focus = focus;
+  }
+
+  isFocused(type: keyof FocusComponents, time: UTCTimestamp): boolean {
+    const list = this.focus[type];
+    if (!list || list.length === 0) return true;
+    return list.includes(time);
   }
 
   // ── 1. Regime color coding ──

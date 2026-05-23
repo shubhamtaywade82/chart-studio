@@ -63,6 +63,10 @@ export interface ReflexSignal {
     | 'day_break_up' | 'day_break_down'
     | 'cvd_divergence'
     | 'toxicity_spike'
+    | 'liquidity_sweep'
+    | 'displacement'
+    | 'smt_divergence'
+    | 'inducement_trap'
     | 'neutral';
   urgency: Urgency;
   confidence: number;
@@ -99,14 +103,20 @@ export interface TradeSetup {
 
 export interface TacticalAnalysis {
   layer: 'tactical';
+  ts: number;
   regime: 'accumulation' | 'distribution' | 'trending-up' | 'trending-down' | 'breakout' | 'failed_breakout' | 'range-bound';
   regimeConfidence: number;
   levels: AILevel[];
   divergences: AIDivergence[];
   setup: TradeSetup;
+  /** SMC components that the AI identifies as high-priority/confluent. */
+  focus_components?: {
+    order_blocks?: UTCTimestamp[];
+    fvgs?: UTCTimestamp[];
+    sweeps?: UTCTimestamp[];
+  };
   narrative: string;
   urgency: Urgency;
-  ts: number;
 }
 
 export interface AIAnnotation {
