@@ -62,6 +62,7 @@ export class ChartView {
   private candles: Candle[] = [];
   private theme: CandleTheme = loadCandleTheme();
   private precision: number = 2;
+  private cachedCandleWidth = 8;
   private resizeObs: ResizeObserver;
   private markersPlugin?: any;
   private crosshairListeners = new Set<(c: CrosshairInfo | null) => void>();
@@ -169,6 +170,7 @@ export class ChartView {
 
     this.resizeObs = new ResizeObserver(() => {
       this._api.resize(container.clientWidth, container.clientHeight);
+      this.updateCandleWidth();
     });
     this.resizeObs.observe(container);
 
@@ -395,38 +397,59 @@ export class ChartView {
     }
   }
 
+  private lastSeriesUpdateTs = 0;
+
   updateCandle(c: Candle): void {
     const t = Math.floor(c.openTime / 1000) as UTCTimestamp;
     
-    // Always update internal state.
+    // Check if we actually need a native update before mutating state
+    const last = this.candles[this.candles.length - 1];
+    const isLive = (last && c.openTime === last.openTime);
+    let needsNativeUpdate = true;
+    
+    if (isLive) {
+      const boundsChanged = c.high !== last.high || c.low !== last.low;
+      const now = Date.now();
+      const timeSinceLastUpdate = now - this.lastSeriesUpdateTs;
+      
+      // Update natively if bounds expanded, or at most 5 times a second (200ms throttle)
+      // to keep volume and scales reasonably up to date without choking the main thread.
+      if (!boundsChanged && timeSinceLastUpdate < 200) {
+        needsNativeUpdate = false;
+      }
+    }
+
+    // Always update internal state for primitives immediately.
     this.updateCandleState(c);
 
     // Lightweight charts: update() can only add a new bar or update the LATEST one.
     // If t < lastUpdatedTime, it's an out-of-order update (e.g. sealed bar arrived late).
     if (!this.lastUpdatedTime || t >= this.lastUpdatedTime) {
-      try {
-        const isLive = (this.candles.length > 0 && c.openTime === this.candles[this.candles.length - 1]!.openTime);
-        const colorOpts = isLive 
-          ? { color: 'rgba(0,0,0,0)', wickColor: 'rgba(0,0,0,0)', borderColor: 'rgba(0,0,0,0)' } 
-          : { color: undefined, wickColor: undefined, borderColor: undefined };
+      if (needsNativeUpdate) {
+        try {
+          const colorOpts = isLive 
+            ? { color: 'rgba(0,0,0,0)', wickColor: 'rgba(0,0,0,0)', borderColor: 'rgba(0,0,0,0)' } 
+            : { color: undefined, wickColor: undefined, borderColor: undefined };
 
-        this.series.update({ time: t, open: c.open, high: c.high, low: c.low, close: c.close, ...colorOpts });
-        
-        if (isLive && this.candles.length > 1) {
-          const prev = this.candles[this.candles.length - 2]!;
-          const prevT = Math.floor(prev.openTime / 1000) as UTCTimestamp;
-          if (prevT < t) {
-            this.series.update({ time: prevT, open: prev.open, high: prev.high, low: prev.low, close: prev.close, color: undefined, wickColor: undefined, borderColor: undefined });
+          this.series.update({ time: t, open: c.open, high: c.high, low: c.low, close: c.close, ...colorOpts });
+          
+          if (isLive && this.candles.length > 1) {
+            const prev = this.candles[this.candles.length - 2]!;
+            const prevT = Math.floor(prev.openTime / 1000) as UTCTimestamp;
+            if (prevT < t) {
+              this.series.update({ time: prevT, open: prev.open, high: prev.high, low: prev.low, close: prev.close, color: undefined, wickColor: undefined, borderColor: undefined });
+            }
           }
+          this.volume.update({
+            time: t,
+            value: c.volume,
+            color: c.close >= c.open ? (this.theme.volumeUp ?? 'rgba(46, 189, 133, 0.35)') : (this.theme.volumeDown ?? 'rgba(246, 70, 93, 0.35)'),
+          });
+          this.lastUpdatedTime = t;
+          this.lastSeriesUpdateTs = Date.now();
+        } catch (e) {
+          console.warn('[chart] failed to update bar', e);
         }
-        this.volume.update({
-          time: t,
-          value: c.volume,
-          color: c.close >= c.open ? (this.theme.volumeUp ?? 'rgba(46, 189, 133, 0.35)') : (this.theme.volumeDown ?? 'rgba(246, 70, 93, 0.35)'),
-        });
-        this.lastUpdatedTime = t;
-      } catch (e) {
-        console.warn('[chart] failed to update bar', e);
       }
     } else {
       // Historical or late update: refresh entire series to show the finalized previous bar.
@@ -434,8 +457,8 @@ export class ChartView {
     }
 
     // Visual smoothness for the live bar.
-    const last = this.candles[this.candles.length - 1];
-    if (last && c.openTime === last.openTime) {
+    const currentLast = this.candles[this.candles.length - 1];
+    if (currentLast && c.openTime === currentLast.openTime) {
       this.motion.setTarget(c.close);
     }
 
@@ -567,22 +590,16 @@ export class ChartView {
     const themeColor = isBullish 
       ? (this.theme.options.upColor || '#2ebd85') 
       : (this.theme.options.downColor || '#f6465d');
+    const borderColor = isBullish
+      ? (this.theme.options.borderUpColor || themeColor)
+      : (this.theme.options.borderDownColor || themeColor);
 
-    this.realtimeLine.update(x, y, previousX, previousY, themeColor);
+    this.realtimeLine.update(x, y, previousX, previousY, borderColor);
 
     const openY = this.series.priceToCoordinate(last.open);
     const highY = this.series.priceToCoordinate(last.high);
     const lowY = this.series.priceToCoordinate(last.low);
     const closeY = y;
-
-    const timeScale = this._api.timeScale();
-    const visibleRange = timeScale.getVisibleLogicalRange();
-    let candleWidth = 8;
-    if (visibleRange && visibleRange.to > visibleRange.from) {
-      const barSpacing = timeScale.width() / (visibleRange.to - visibleRange.from);
-      candleWidth = Math.max(1, Math.floor(barSpacing * 0.75));
-      if (candleWidth % 2 !== 0 && candleWidth > 1) candleWidth += 1; // keep it even for sharp rendering
-    }
 
     if (openY != null && highY != null && lowY != null) {
       this.activeCandle.update({
@@ -591,8 +608,9 @@ export class ChartView {
         highY,
         lowY,
         closeY,
-        candleWidth,
+        candleWidth: this.cachedCandleWidth,
         color: themeColor,
+        borderColor: borderColor,
       });
     }
 
@@ -1180,8 +1198,20 @@ export class ChartView {
 
   private handleClick(_p: MouseEventParams): void { /* reserved */ }
 
+  private updateCandleWidth(range?: LogicalRange | null): void {
+    const timeScale = this._api.timeScale();
+    const visibleRange = range || timeScale.getVisibleLogicalRange();
+    if (visibleRange && visibleRange.to > visibleRange.from) {
+      const barSpacing = timeScale.width() / (visibleRange.to - visibleRange.from);
+      let cw = Math.max(1, Math.floor(barSpacing * 0.75));
+      if (cw % 2 !== 0 && cw > 1) cw += 1;
+      this.cachedCandleWidth = cw;
+    }
+  }
+
   private handleRangeChange(range: LogicalRange | null): void {
     if (!range) return;
+    this.updateCandleWidth(range);
     const atLive = range.to >= this.candles.length - 1;
     if (atLive !== this.atLive) {
       this.atLive = atLive;

@@ -14,6 +14,7 @@ export class ActiveCandleRenderer {
   candleWidth = 8
 
   color = '#00ff88'
+  borderColor = '#00ff88'
 
   draw(target: CanvasRenderingTarget2D) {
     target.useMediaCoordinateSpace(
@@ -22,11 +23,11 @@ export class ActiveCandleRenderer {
 
         ctx.save()
 
-        ctx.strokeStyle = this.color
+        ctx.strokeStyle = this.borderColor
         ctx.fillStyle = this.color
 
         ctx.shadowBlur = 14
-        ctx.shadowColor = this.color
+        ctx.shadowColor = this.borderColor
 
         // wick
         ctx.beginPath()
@@ -49,6 +50,13 @@ export class ActiveCandleRenderer {
         )
 
         ctx.fillRect(
+          this.x - this.candleWidth / 2,
+          bodyTop,
+          this.candleWidth,
+          bodyHeight
+        )
+        
+        ctx.strokeRect(
           this.x - this.candleWidth / 2,
           bodyTop,
           this.candleWidth,

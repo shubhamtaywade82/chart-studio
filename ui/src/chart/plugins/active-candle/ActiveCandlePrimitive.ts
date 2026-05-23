@@ -23,6 +23,7 @@ export class ActiveCandlePrimitive
     closeY: number
     candleWidth: number
     color: string
+    borderColor: string
   }) {
     Object.assign(this.renderer, data)
     this.requestUpdate?.()
