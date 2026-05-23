@@ -19,7 +19,10 @@ import {
 import type { Candle } from './provider-client';
 import { CANDLE_THEMES, loadCandleTheme, saveCandleTheme, type CandleTheme } from './chart/candle-themes';
 import { LtpPrimitive } from './chart/ltp-primitive';
-import { SmoothPriceAnimator } from './chart/smooth-price';
+import { MotionEngine } from './chart/engine/MotionEngine';
+import { RafScheduler } from './chart/engine/RafScheduler';
+import { RealtimeLinePrimitive } from './chart/plugins/realtime-line/RealtimeLinePrimitive';
+import { ActiveCandlePrimitive } from './chart/plugins/active-candle/ActiveCandlePrimitive';
 import { vwap } from './indicators/math';
 import {
   SMA, EMA, RSI, BollingerBands, MACD, ATR, ADX, Stochastic, CCI, OBV, MFI, Supertrend, IchimokuCloud
@@ -52,7 +55,10 @@ export class ChartView {
     return this._api;
   }
   private ltp: LtpPrimitive;
-  private ltpAnimator: SmoothPriceAnimator;
+  private motion: MotionEngine;
+  private scheduler: RafScheduler;
+  private realtimeLine: RealtimeLinePrimitive;
+  private activeCandle: ActiveCandlePrimitive;
   private candles: Candle[] = [];
   private theme: CandleTheme = loadCandleTheme();
   private precision: number = 2;
@@ -144,7 +150,15 @@ export class ChartView {
     this.ltp = new LtpPrimitive();
     this.series.attachPrimitive(this.ltp);
 
-    this.ltpAnimator = new SmoothPriceAnimator(0.01, (p) => this.onSmoothPriceUpdate(p));
+    this.motion = new MotionEngine(0.18);
+    this.scheduler = new RafScheduler();
+    this.realtimeLine = new RealtimeLinePrimitive();
+    this.activeCandle = new ActiveCandlePrimitive();
+    
+    this.series.attachPrimitive(this.realtimeLine);
+    this.series.attachPrimitive(this.activeCandle);
+    
+    this.scheduler.subscribe((time) => this.onAnimationFrame(time));
 
     const pane0 = this._api.panes()[0];
     if (pane0) {
@@ -175,6 +189,10 @@ export class ChartView {
     this.depthHeatmap = new DepthHeatmap();
     this.volumeProfile = new VolumeProfilePanel();
     this.aiOverlay = new AIOverlayManager(this._api, this.series, container);
+  }
+
+  public getAnalytics(): AnalyticsRenderer | null {
+    return this.analytics;
   }
 
   /** Day open ms timestamp used to extrapolate expected volume. */
@@ -311,7 +329,7 @@ export class ChartView {
 
     this.candles = Array.from(map.values()).sort((a, b) => a.openTime - b.openTime);
     
-    this.ltpAnimator.reset();
+    this.motion.reset();
     const last = this.candles[this.candles.length - 1];
     if (last) {
       this.lastUpdatedTime = Math.floor(last.openTime / 1000) as UTCTimestamp;
@@ -326,7 +344,6 @@ export class ChartView {
       }
     }
     const tickSize = 1 / Math.pow(10, precision);
-    this.ltpAnimator.setTickSize(tickSize);
 
     this.series.applyOptions({
       priceFormat: {
@@ -336,9 +353,10 @@ export class ChartView {
       },
     });
 
-    const cs = this.candles.map((c) => ({
+    const cs = this.candles.map((c, i) => ({
       time: Math.floor(c.openTime / 1000) as UTCTimestamp,
       open: c.open, high: c.high, low: c.low, close: c.close,
+      ...(i === this.candles.length - 1 ? { color: 'rgba(0,0,0,0)', wickColor: 'rgba(0,0,0,0)', borderColor: 'rgba(0,0,0,0)' } : {})
     }));
     const vs = this.candles.map((c) => ({
       time: Math.floor(c.openTime / 1000) as UTCTimestamp,
@@ -387,7 +405,20 @@ export class ChartView {
     // If t < lastUpdatedTime, it's an out-of-order update (e.g. sealed bar arrived late).
     if (!this.lastUpdatedTime || t >= this.lastUpdatedTime) {
       try {
-        this.series.update({ time: t, open: c.open, high: c.high, low: c.low, close: c.close });
+        const isLive = (this.candles.length > 0 && c.openTime === this.candles[this.candles.length - 1]!.openTime);
+        const colorOpts = isLive 
+          ? { color: 'rgba(0,0,0,0)', wickColor: 'rgba(0,0,0,0)', borderColor: 'rgba(0,0,0,0)' } 
+          : { color: undefined, wickColor: undefined, borderColor: undefined };
+
+        this.series.update({ time: t, open: c.open, high: c.high, low: c.low, close: c.close, ...colorOpts });
+        
+        if (isLive && this.candles.length > 1) {
+          const prev = this.candles[this.candles.length - 2]!;
+          const prevT = Math.floor(prev.openTime / 1000) as UTCTimestamp;
+          if (prevT < t) {
+            this.series.update({ time: prevT, open: prev.open, high: prev.high, low: prev.low, close: prev.close, color: undefined, wickColor: undefined, borderColor: undefined });
+          }
+        }
         this.volume.update({
           time: t,
           value: c.volume,
@@ -405,8 +436,7 @@ export class ChartView {
     // Visual smoothness for the live bar.
     const last = this.candles[this.candles.length - 1];
     if (last && c.openTime === last.openTime) {
-      this.ltpAnimator.snapTo(c.close);
-      this.onSmoothPriceUpdate(this.ltpAnimator.getPrice() || c.close);
+      this.motion.setTarget(c.close);
     }
 
     for (const smc of this.smcPrimitives) {
@@ -415,9 +445,10 @@ export class ChartView {
   }
 
   private refreshChartData(): void {
-    const cs = this.candles.map((c) => ({
+    const cs = this.candles.map((c, i) => ({
       time: Math.floor(c.openTime / 1000) as UTCTimestamp,
       open: c.open, high: c.high, low: c.low, close: c.close,
+      ...(i === this.candles.length - 1 ? { color: 'rgba(0,0,0,0)', wickColor: 'rgba(0,0,0,0)', borderColor: 'rgba(0,0,0,0)' } : {})
     }));
     const vs = this.candles.map((c) => ({
       time: Math.floor(c.openTime / 1000) as UTCTimestamp,
@@ -437,14 +468,15 @@ export class ChartView {
 
     // Interval rollover: create a new candle when the current interval expires.
     if (this.intervalMs > 0 && last && currentTime >= last.openTime + this.intervalMs) {
-      this.ltpAnimator.flush();
       const newOpenTime = Math.floor(currentTime / this.intervalMs) * this.intervalMs;
       const newCandle: Candle = { openTime: newOpenTime, open: price, high: price, low: price, close: price, volume: qty ?? 0 };
       const t = Math.floor(newOpenTime / 1000) as UTCTimestamp;
 
       if (!this.lastUpdatedTime || t >= this.lastUpdatedTime) {
         try {
-          this.series.update({ time: t, open: price, high: price, low: price, close: price });
+          this.series.update({ time: t, open: price, high: price, low: price, close: price, color: 'rgba(0,0,0,0)', wickColor: 'rgba(0,0,0,0)', borderColor: 'rgba(0,0,0,0)' });
+          const prevT = Math.floor(last.openTime / 1000) as UTCTimestamp;
+          this.series.update({ time: prevT, open: last.open, high: last.high, low: last.low, close: last.close, color: undefined, wickColor: undefined, borderColor: undefined });
           this.volume.update({
             time: t,
             value: newCandle.volume,
@@ -456,7 +488,7 @@ export class ChartView {
         }
       }
       this.updateCandleState(newCandle);
-      this.ltpAnimator.snapTo(price);
+      this.motion.setTarget(price);
       return;
     }
 
@@ -482,7 +514,7 @@ export class ChartView {
       const t = Math.floor(openTime / 1000) as UTCTimestamp;
       if (!this.lastUpdatedTime || t >= this.lastUpdatedTime) {
         try {
-          this.series.update({ time: t, open: price, high: price, low: price, close: price });
+          this.series.update({ time: t, open: price, high: price, low: price, close: price, color: 'rgba(0,0,0,0)', wickColor: 'rgba(0,0,0,0)', borderColor: 'rgba(0,0,0,0)' });
           this.volume.update({
             time: t,
             value: newCandle.volume,
@@ -497,33 +529,71 @@ export class ChartView {
     }
 
     // drive visual smoothness via animator.
-    this.ltpAnimator.snapTo(price);
+    this.motion.setTarget(price);
   }
 
-  private onSmoothPriceUpdate(animatedPrice: number): void {
+  private onAnimationFrame(timeMs: number): void {
+    if (this.candles.length === 0) return;
+    
+    const animatedPrice = this.motion.update(timeMs);
+    if (animatedPrice === null) return;
+
     const last = this.candles[this.candles.length - 1];
     if (!last) return;
+
     const t = Math.floor(last.openTime / 1000) as UTCTimestamp;
 
-    // Safety guard: never push a timestamp older than what the series last saw.
-    if (this.lastUpdatedTime !== null && t < this.lastUpdatedTime) {
-      const color = animatedPrice >= last.open ? '#2ebd85' : '#f6465d';
-      this.ltp.setLtp(animatedPrice, color, null);
-      return;
+    const x = this._api.timeScale().timeToCoordinate(t);
+    if (x == null) return;
+
+    const y = this.series.priceToCoordinate(animatedPrice);
+    if (y == null) return;
+
+    // The realtime line visually starts slightly before the candle to show direction
+    let previousX = x - 20;
+    let previousY = y;
+    if (this.candles.length > 1) {
+      const prev = this.candles[this.candles.length - 2]!;
+      const prevT = Math.floor(prev.openTime / 1000) as UTCTimestamp;
+      const pX = this._api.timeScale().timeToCoordinate(prevT);
+      const pY = this.series.priceToCoordinate(prev.close);
+      if (pX != null && pY != null) {
+        previousX = pX;
+        previousY = pY;
+      }
     }
 
-    try {
-      // Visual only update; does not advance lastUpdatedTime so subsequent frames
-      // for the same bar can continue to update it.
-      this.series.update({ time: t, open: last.open, high: last.high, low: last.low, close: animatedPrice });
+    const isBullish = animatedPrice >= last.open;
+    const themeColor = isBullish 
+      ? (this.theme.options.upColor || '#2ebd85') 
+      : (this.theme.options.downColor || '#f6465d');
 
-      this.volume.update({
-        time: t,
-        value: last.volume,
-        color: animatedPrice >= last.open ? (this.theme.volumeUp ?? 'rgba(46, 189, 133, 0.6)') : (this.theme.volumeDown ?? 'rgba(246, 70, 93, 0.6)'),
+    this.realtimeLine.update(x, y, previousX, previousY, themeColor);
+
+    const openY = this.series.priceToCoordinate(last.open);
+    const highY = this.series.priceToCoordinate(last.high);
+    const lowY = this.series.priceToCoordinate(last.low);
+    const closeY = y;
+
+    const timeScale = this._api.timeScale();
+    const visibleRange = timeScale.getVisibleLogicalRange();
+    let candleWidth = 8;
+    if (visibleRange && visibleRange.to > visibleRange.from) {
+      const barSpacing = timeScale.width() / (visibleRange.to - visibleRange.from);
+      candleWidth = Math.max(1, Math.floor(barSpacing * 0.75));
+      if (candleWidth % 2 !== 0 && candleWidth > 1) candleWidth += 1; // keep it even for sharp rendering
+    }
+
+    if (openY != null && highY != null && lowY != null) {
+      this.activeCandle.update({
+        x,
+        openY,
+        highY,
+        lowY,
+        closeY,
+        candleWidth,
+        color: themeColor,
       });
-    } catch (e) {
-      console.warn('[chart] animation update skipped', e);
     }
 
     const color = animatedPrice >= last.open ? '#2ebd85' : '#f6465d';
@@ -533,7 +603,7 @@ export class ChartView {
 
   clearLastTradePrice(): void {
     this.candles = [];
-    this.ltpAnimator.reset();
+    this.motion.reset();
     this.lastUpdatedTime = null;
     this.ltp.setLtp(null, '#2ebd85', null);
     if (this.askLine) { try { this.series.removePriceLine(this.askLine); } catch {} this.askLine = null; }
@@ -1137,9 +1207,10 @@ export class ChartView {
     const fresh = older.filter((c) => !existing.has(c.openTime));
     if (fresh.length === 0) return;
     this.candles = [...fresh, ...this.candles].sort((a, b) => a.openTime - b.openTime);
-    const cs = this.candles.map((c) => ({
+    const cs = this.candles.map((c, i) => ({
       time: Math.floor(c.openTime / 1000) as UTCTimestamp,
       open: c.open, high: c.high, low: c.low, close: c.close,
+      ...(i === this.candles.length - 1 ? { color: 'rgba(0,0,0,0)', wickColor: 'rgba(0,0,0,0)', borderColor: 'rgba(0,0,0,0)' } : {})
     }));
     const vs = this.candles.map((c) => ({
       time: Math.floor(c.openTime / 1000) as UTCTimestamp,
@@ -1152,7 +1223,8 @@ export class ChartView {
   }
 
   dispose(): void {
-    this.ltpAnimator.reset();
+    this.scheduler.stop();
+    this.motion.reset();
     this.resizeObs.disconnect();
     // Detach LTP primitive so its requestUpdate callback can't fire on a
     // disposed chart.

@@ -273,6 +273,33 @@ const main = (): void => {
     });
   });
 
+  const indicatorHost = document.getElementById('indicator-picker-host');
+  if (indicatorHost) {
+    const toggles = [
+      { key: 'showDayOpen', label: 'Day Open (DO)' },
+      { key: 'showDayHigh', label: 'Day High (DH)' },
+      { key: 'showDayLow', label: 'Day Low (DL)' },
+      { key: 'showPrevClose', label: 'Previous Close' },
+      { key: 'showAtp', label: 'Average Traded Price (ATP)' },
+    ];
+    
+    indicatorHost.innerHTML = toggles.map(t => `
+      <label style="display:flex; align-items:center; gap:8px; margin-bottom:8px; cursor:pointer;">
+        <input type="checkbox" id="toggle-${t.key}" checked />
+        <span>${t.label}</span>
+      </label>
+    `).join('');
+
+    toggles.forEach(t => {
+      document.getElementById(`toggle-${t.key}`)?.addEventListener('change', (e) => {
+        const analytics = chart.getAnalytics();
+        if (analytics) {
+          (analytics.options as any)[t.key] = (e.target as HTMLInputElement).checked;
+        }
+      });
+    });
+  }
+
   // ── Topbar interval bar ─────────────────────────────────────────────
   const renderIntervals = (): void => {
     intervalBar.innerHTML = INTERVALS.map((i) =>

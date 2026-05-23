@@ -3,14 +3,15 @@ import {
   type ISeriesApi,
   type Time,
   type HistogramData,
-  ColorType
+  ColorType,
+  HistogramSeries
 } from 'lightweight-charts';
 
 export class FundingOverlay {
   private series: ISeriesApi<"Histogram">;
 
   constructor(chart: IChartApi) {
-    this.series = chart.addHistogramSeries({
+    this.series = chart.addSeries(HistogramSeries, {
       color: '#2ebd85',
       priceFormat: {
         type: 'custom',

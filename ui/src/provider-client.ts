@@ -90,6 +90,7 @@ export interface OptionChainData {
   supportOI: number;
   resistanceOI: number;
   spotPrice: number;
+  atmStrike?: number;
 }
 
 export interface ProviderInfo { provider: string; displayName: string; online: boolean; lastSeen: number }
