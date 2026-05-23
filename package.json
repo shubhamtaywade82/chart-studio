@@ -20,11 +20,12 @@
     "dev:dhanhq": "npm run -w @chart-studio/adapter-dhanhq dev",
     "dev:ai": "npm run -w @chart-studio/ai-engine dev",
     "dev:ui": "npm run -w @chart-studio/ui dev",
-    "dev": "concurrently \"npm run dev:gateway\" \"npm run dev:binance\" \"npm run dev:dhanhq\" \"npm run dev:ai\" \"npm run dev:ui\"",
+    "dev": "dotenv -- concurrently \"npm run dev:gateway\" \"npm run dev:binance\" \"npm run dev:dhanhq\" \"npm run dev:ai\" \"npm run dev:ui\"",
     "typecheck": "tsc -b packages/adapter-core packages/gateway packages/adapter-binance packages/adapter-dhanhq packages/ai-engine"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "dotenv-cli": "^11.0.0"
   },
   "engines": {
     "node": ">=20"
