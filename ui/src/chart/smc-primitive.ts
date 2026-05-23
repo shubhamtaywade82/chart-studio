@@ -484,7 +484,8 @@ class SmcPaneView implements IPrimitivePaneView {
             ctx.fillStyle = item.type === 'bullish' ? '#26a69a' : '#ef5350';
             ctx.font = `${Math.round(9 * dpr)}px sans-serif`;
             ctx.setLineDash([]);
-            ctx.fillText('BOS', bXEnd - Math.round(24 * dpr), bY - Math.round(4 * dpr));
+            const tw = ctx.measureText('BOS').width;
+            ctx.fillText('BOS', bXStart + (bXEnd - bXStart) / 2 - tw / 2, bY - Math.round(4 * dpr));
           }
 
           // ── 4. Draw CHoCH Lines ──
@@ -510,7 +511,8 @@ class SmcPaneView implements IPrimitivePaneView {
             // Label
             ctx.fillStyle = item.type === 'bullish' ? '#26a69a' : '#ef5350';
             ctx.font = `bold ${Math.round(9 * dpr)}px sans-serif`;
-            ctx.fillText('CHoCH', bXEnd - Math.round(36 * dpr), bY - Math.round(4 * dpr));
+            const tw = ctx.measureText('CHoCH').width;
+            ctx.fillText('CHoCH', bXStart + (bXEnd - bXStart) / 2 - tw / 2, bY - Math.round(4 * dpr));
           }
 
           ctx.restore();

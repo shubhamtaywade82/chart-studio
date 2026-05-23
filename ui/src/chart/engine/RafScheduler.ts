@@ -22,6 +22,8 @@ export class RafScheduler {
   public start() {
     if (this.isRunning) return;
     this.isRunning = true;
+    this.isSleeping = false;
+    this.renderFramesRequested = 2; // at least kick off a few frames
     this.tick(performance.now());
   }
 
@@ -44,6 +46,42 @@ export class RafScheduler {
       }
     }
 
-    this.animationFrameId = requestAnimationFrame(this.tick);
+    if (this.renderFramesRequested > 0) {
+      this.renderFramesRequested--;
+      this.animationFrameId = requestAnimationFrame(this.tick);
+    } else {
+      this.isSleeping = true;
+      this.animationFrameId = null;
+    }
   };
+
+  private isSleeping = false;
+  private renderFramesRequested = 0;
+
+  /**
+   * Wakes up the scheduler to render the specified number of frames.
+   * Useful when something changes but continuous animation isn't needed.
+   */
+  public requestRender(frames: number = 2) {
+    this.renderFramesRequested = Math.max(this.renderFramesRequested, frames);
+    if (this.isSleeping && this.isRunning) {
+      this.isSleeping = false;
+      this.animationFrameId = requestAnimationFrame(this.tick);
+    }
+  }
+
+  /**
+   * Forces the scheduler to run continuously until suspended.
+   */
+  public requestContinuousRender() {
+    this.renderFramesRequested = 9999999;
+    if (this.isSleeping && this.isRunning) {
+      this.isSleeping = false;
+      this.animationFrameId = requestAnimationFrame(this.tick);
+    }
+  }
+
+  public suspendContinuousRender() {
+    this.renderFramesRequested = 0;
+  }
 }

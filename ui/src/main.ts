@@ -56,6 +56,7 @@ const parseHash = (): AppState | null => {
 const writeHash = (s: AppState): void => {
   const target = `#${s.provider}:${s.symbol}@${s.interval}`;
   if (location.hash !== target) location.hash = target;
+  localStorage.setItem('ui-active-state', JSON.stringify(s));
 };
 
 const main = (): void => {
@@ -323,6 +324,7 @@ const main = (): void => {
         const checked = (e.target as HTMLInputElement).checked;
         if (analytics) {
           (analytics.options as any)[t.key] = checked;
+          analytics.forceRedraw();
         }
         savedAnalytics[t.key] = checked;
         localStorage.setItem('ui-analytics-toggles', JSON.stringify(savedAnalytics));
@@ -572,16 +574,28 @@ const main = (): void => {
     const tryBootstrap = (): void => {
       if (bootstrapped) return;
       const providers = settings.providers();
-      const online = providers.find((p) => p.online);
-      if (!online) return;
-      bootstrapped = true;
-      const defaultSymbol = online.provider.startsWith('binance') ? 'BTCUSDT' : null;
-      if (defaultSymbol) {
-        applyState({ provider: online.provider, symbol: defaultSymbol, interval: '1m' });
+      let initial = parseHash();
+      if (!initial) {
+        try {
+          const saved = localStorage.getItem('ui-active-state');
+          if (saved) initial = JSON.parse(saved);
+        } catch { /* ignore */ }
+      }
+      if (initial) {
+        applyState(initial);
+        bootstrapped = true;
       } else {
-        hdrSymbol.textContent = `Press ⌘K to search ${online.displayName}`;
-        hdrVenue.textContent = online.provider.toUpperCase();
-        renderIntervals();
+        const online = providers.find((p) => p.online);
+        if (!online) return;
+        bootstrapped = true;
+        const defaultSymbol = online.provider.startsWith('binance') ? 'BTCUSDT' : null;
+        if (defaultSymbol) {
+          applyState({ provider: online.provider, symbol: defaultSymbol, interval: '1m' });
+        } else {
+          hdrSymbol.textContent = `Press ⌘K to search ${online.displayName}`;
+          hdrVenue.textContent = online.provider.toUpperCase();
+          renderIntervals();
+        }
       }
     };
     void settings.refresh().then(tryBootstrap);

@@ -38,6 +38,7 @@ export class AnalyticsRenderer {
   private buyInit = false;
   private oiInit = false;
   private lastOptionLineUpdate = 0;
+  private lastState: AnalyticsState | null = null;
 
   public options = {
     showDayOpen: true,
@@ -174,6 +175,7 @@ export class AnalyticsRenderer {
   }
 
   update(state: AnalyticsState): void {
+    this.lastState = state;
     // ATP deviation
     if (this.atpSeries) {
       if (this.options.showAtp) {
@@ -231,6 +233,12 @@ export class AnalyticsRenderer {
 
     // Day level markers
     this.updateDayLevels(state);
+  }
+
+  forceRedraw(): void {
+    if (this.lastState) {
+      this.update(this.lastState);
+    }
   }
 
   /** Tracks the last price set per key, to skip no-op recreations. */
