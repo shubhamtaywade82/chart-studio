@@ -22,6 +22,7 @@ import { LtpPlugin } from './chart/ltp-primitive';
 import { RealtimeLinePlugin } from './chart/plugins/realtime-line/RealtimeLinePrimitive';
 import { ActiveCandlePlugin } from './chart/plugins/active-candle/ActiveCandlePrimitive';
 import { PositionPlugin } from './chart/plugins/positions/PositionPlugin';
+import { PriceAlertsPlugin } from './chart/plugins/alerts/PriceAlertsPlugin';
 import { ChartEngine } from './chart/engine/ChartEngine';
 import { vwap } from './indicators/math';
 import {
@@ -60,6 +61,7 @@ export class ChartView {
   private realtimeLine: RealtimeLinePlugin;
   private activeCandle: ActiveCandlePlugin;
   private positionPlugin: PositionPlugin;
+  private alertsPlugin: PriceAlertsPlugin;
   
   private candles: Candle[] = [];
   private theme: CandleTheme = loadCandleTheme();
@@ -135,11 +137,13 @@ export class ChartView {
     this.realtimeLine = new RealtimeLinePlugin(this.engine);
     this.activeCandle = new ActiveCandlePlugin(this.engine);
     this.positionPlugin = new PositionPlugin(this.engine);
+    this.alertsPlugin = new PriceAlertsPlugin();
     
     this.engine.registerPlugin(this.ltp);
     this.engine.registerPlugin(this.realtimeLine);
     this.engine.registerPlugin(this.activeCandle);
     this.engine.registerPlugin(this.positionPlugin);
+    this.series.attachPrimitive(this.alertsPlugin);
 
     const pane0 = this._api.panes()[0];
     if (pane0) {
@@ -202,6 +206,23 @@ export class ChartView {
 
   setPositions(positions: any[]): void {
     this.positionPlugin.setPositions(positions);
+  }
+
+  setAlerts(alerts: any[]): void {
+    this.alertsPlugin.setAlerts(alerts.map(a => ({
+      id: a.id,
+      price: a.price,
+      title: a.note || 'Alert',
+      color: '#7c4dff',
+    })));
+  }
+
+  onAlertMoved(fn: (id: string, price: number) => void): void {
+    this.alertsPlugin.onAlertMoved = fn;
+  }
+
+  onAlertDeleted(fn: (id: string) => void): void {
+    this.alertsPlugin.onAlertDeleted = fn;
   }
 
   // ── AI overlay wiring ───────────────────────────────────────────────

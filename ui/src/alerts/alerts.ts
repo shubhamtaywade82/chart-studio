@@ -46,6 +46,7 @@ export class AlertEngine {
   private alerts: PriceAlert[] = loadStored();
   private subs = new Map<string, { unsub: () => void; refs: Set<string> }>();
   private listeners = new Set<(alert: PriceAlert) => void>();
+  private changeListeners = new Set<() => void>();
 
   constructor(private readonly client: ProviderClient) {
     for (const a of this.alerts) if (a.active) this.ensureSub(a);
@@ -59,6 +60,11 @@ export class AlertEngine {
     return () => { this.listeners.delete(fn); };
   }
 
+  onChange(fn: () => void): () => void {
+    this.changeListeners.add(fn);
+    return () => { this.changeListeners.delete(fn); };
+  }
+
   list(): PriceAlert[] { return [...this.alerts].sort((a, b) => Number(b.active) - Number(a.active)); }
 
   add(input: Omit<PriceAlert, 'id' | 'active' | 'lastPrice'>): PriceAlert {
@@ -66,6 +72,7 @@ export class AlertEngine {
     this.alerts.push(a);
     persist(this.alerts);
     this.ensureSub(a);
+    this.changeListeners.forEach(fn => fn());
     void this.requestPermissionOnce();
     return a;
   }
@@ -76,6 +83,7 @@ export class AlertEngine {
     this.releaseSub(a);
     this.alerts = this.alerts.filter((x) => x.id !== id);
     persist(this.alerts);
+    this.changeListeners.forEach(fn => fn());
   }
 
   toggle(id: string): void {
@@ -84,6 +92,7 @@ export class AlertEngine {
     a.active = !a.active;
     if (a.active) this.ensureSub(a); else this.releaseSub(a);
     persist(this.alerts);
+    this.changeListeners.forEach(fn => fn());
   }
 
   private keyOf(a: { provider: string; symbol: string }): string { return `${a.provider}:${a.symbol}`; }
@@ -124,6 +133,7 @@ export class AlertEngine {
         }
         this.notify(a);
         dirty = true;
+        this.changeListeners.forEach(fn => fn());
       }
     }
     if (dirty) persist(this.alerts);

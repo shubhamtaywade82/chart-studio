@@ -48,6 +48,15 @@ export function startMonitoringServer(port: number = 9090) {
     }
   });
 
+  server.on('error', (e: NodeJS.ErrnoException) => {
+    if (e.code === 'EADDRINUSE') {
+      console.warn(`[Monitoring] Port ${port} is in use, trying ${port + 1}`);
+      startMonitoringServer(port + 1);
+    } else {
+      console.error('[Monitoring] Server error:', e);
+    }
+  });
+
   server.listen(port, () => {
     console.log(`[Monitoring] HTTP Server running on port ${port}`);
   });

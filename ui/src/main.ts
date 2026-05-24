@@ -91,7 +91,52 @@ const main = (): void => {
   const smartSignals = new SmartSignalsPanel();
   const morningBriefPanel = new MorningBriefPanel();
   const tradingOps = new TradingOpsPanel(document.getElementById('trading-ops-root')!);
+
+  // Alert sync
+  const syncAlerts = () => {
+    if (!activeState) return;
+    const all = alertEngine.list().filter(a => a.symbol === activeState?.symbol && a.active);
+    chart.setAlerts(all);
+  };
+
+  chart.onAlertMoved((id, price) => {
+    const a = alertEngine.list().find(x => x.id === id);
+    if (a) {
+      alertEngine.remove(id);
+      alertEngine.add({ ...a, price });
+      syncAlerts();
+    }
+  });
+
+  chart.onAlertDeleted((id) => {
+    alertEngine.remove(id);
+    syncAlerts();
+  });
+
+  alertEngine.onChange(() => {
+    syncAlerts();
+  });
+
+  // Shift + Click to add alert on chart
+  chart.getApi().subscribeClick((param) => {
+    const e = (param as any).sourceEvent as MouseEvent;
+    if (e && e.shiftKey && param.point && activeState) {
+      const price = chart.getMainSeries().coordinateToPrice(param.point.y);
+      if (price !== null) {
+        alertEngine.add({
+          provider: activeState.provider,
+          symbol: activeState.symbol,
+          op: 'cross_above', // Default op
+          price: price,
+          oneShot: true
+        });
+        syncAlerts();
+      }
+    }
+  });
+
   tradingOps.onUpdate((snap) => {
+
     console.log(`[main] trading snapshot received, positions=${snap.positions.length}`);
     chart.setPositions(snap.positions);
   });
@@ -458,6 +503,7 @@ const main = (): void => {
     renderIntervals();
     aiBrief.refresh(state.provider, state.symbol, state.interval);
     strategySignals.bind(state.provider, state.symbol, state.interval);
+    syncAlerts();
     tearDown();
     ob.reset({ lastUpdateId: 0, bids: [], asks: [], ts: 0 });
     tape.reset();
