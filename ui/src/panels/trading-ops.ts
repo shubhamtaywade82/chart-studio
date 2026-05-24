@@ -162,15 +162,14 @@ export class TradingOpsPanel {
     if (!s.positions.length) return `<div class="ops-empty-row">No open positions</div>`;
     return `
       <table class="ops-table">
-        <thead><tr><th>SYMBOL</th><th>QTY</th><th>AVG</th><th>uPnL</th><th>rPnL</th></tr></thead>
+        <thead><tr><th>SYMBOL</th><th>QTY</th><th>AVG</th><th>uPnL</th></tr></thead>
         <tbody>
           ${s.positions.map((p) => `
             <tr>
               <td>${p.symbol}</td>
-              <td class="${p.netQty >= 0 ? 'pos' : 'neg'}">${fmt(p.netQty, 0)}</td>
+              <td class="${p.netQty >= 0 ? 'pos' : 'neg'}">${fmt(p.netQty, 4)}</td>
               <td>${fmt(p.averagePrice)}</td>
               <td class="${pnlClass(p.unrealizedPnl)}">${signed(p.unrealizedPnl)}</td>
-              <td class="${pnlClass(p.realizedPnl)}">${signed(p.realizedPnl)}</td>
             </tr>`).join('')}
         </tbody>
       </table>`;
@@ -187,7 +186,7 @@ export class TradingOpsPanel {
               <td>${new Date(o.ts).toLocaleTimeString()}</td>
               <td>${o.symbol}</td>
               <td class="${o.side === 'BUY' ? 'pos' : 'neg'}">${o.side}</td>
-              <td>${fmt(o.qty, 0)}</td>
+              <td>${fmt(o.qty, 4)}</td>
               <td>${fmt(o.fillPrice)}</td>
               <td class="${pnlClass(o.realizedDelta)}">${o.realizedDelta ? signed(o.realizedDelta) : '—'}</td>
             </tr>`).join('')}

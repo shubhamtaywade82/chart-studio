@@ -176,22 +176,34 @@ export class TradingDesk {
     const realized = positions.reduce((s, p) => s + p.realizedPnl, 0);
     const unrealized = positions.reduce((s, p) => s + p.unrealizedPnl, 0);
     const totalPnl = realized + unrealized;
+    const haveData = this.ltp.size > 0;
     
     // Default to startEquity + PnL (derived)
     let totalEquity = this.startEquity + totalPnl;
     let available = totalEquity;
+    let health: { healthy: boolean; category: string } = haveData || this.mode === 'live'
+      ? { healthy: true, category: 'healthy' }
+      : { healthy: false, category: 'no_market_data' };
 
     if (this.mode === 'live' && this.live) {
       try {
         const liveEquity = await this.live.getTotalEquity();
         const liveBalance = await this.live.getBalance();
         
-        // Only use live values if they are non-zero (or we explicitly trust 0 if the call succeeded)
-        if (liveEquity > 0) totalEquity = liveEquity;
-        if (liveBalance > 0) available = liveBalance;
-        else if (liveEquity > 0) available = liveEquity; // Fallback available to equity if balance fetch failed
+        // Use live values directly
+        totalEquity = liveEquity;
+        available = liveBalance;
       } catch (err) {
         console.warn('[TradingDesk] Failed to fetch live wallet data, falling back to derived:', err);
+        health = { healthy: false, category: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    // Calculate live Unrealized PnL for all positions using current LTP
+    for (const p of positions) {
+      const ltp = this.ltp.get(p.symbol);
+      if (ltp && ltp > 0) {
+        p.unrealizedPnl = (ltp - p.averagePrice) * p.netQty;
       }
     }
 
@@ -204,9 +216,6 @@ export class TradingDesk {
     }
 
     const openCount = positions.filter((p) => p.netQty !== 0).length;
-    const closed = this.wins + this.losses;
-    const winRate = closed > 0 ? (this.wins / closed) * 100 : null;
-
     const lossCapUsd = (this.mode === 'paper' ? this.startEquity : totalEquity) * (this.dailyLossCapPct / 100);
     const utilizationPct = totalEquity > 0 ? (exposure / totalEquity) * 100 : 0;
 
@@ -224,8 +233,6 @@ export class TradingDesk {
     }
 
     const autoEntryAllowed = blockers.length === 0;
-    const haveData = this.ltp.size > 0;
-
     const fin = (n: number, fallback = 0) => Number.isFinite(n) ? n : fallback;
 
     return {
@@ -245,9 +252,7 @@ export class TradingDesk {
         losses: this.losses,
         closed_trades: this.wins + this.losses,
       },
-      execution_health: haveData || this.mode === 'live'
-        ? { healthy: true, category: 'healthy' }
-        : { healthy: false, category: 'no_market_data' },
+      execution_health: health,
       operational_state: {
         execution_mode_label: this.mode === 'paper' ? 'PAPER' : 'LIVE',
         paper_trading: this.mode === 'paper',

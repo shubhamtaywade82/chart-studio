@@ -1,4 +1,7 @@
-import 'dotenv/config';
+import path from 'path';
+import dotenv from 'dotenv';
+dotenv.config({ path: path.resolve(process.cwd(), '../../.env') });
+
 import http from 'http';
 import { URL } from 'url';
 import { WebSocketServer } from 'ws';

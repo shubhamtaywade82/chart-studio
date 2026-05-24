@@ -12,10 +12,31 @@ export interface CoinDCXConfig {
 export class CoinDCXRouter implements OrderRouter {
   private readonly apiKey: string;
   private readonly apiSecret: string;
+  private detectedCurrency: string | null = null;
 
   constructor(config: CoinDCXConfig) {
     this.apiKey = config.apiKey.trim();
     this.apiSecret = config.apiSecret.trim();
+  }
+
+  private async _getCurrency(): Promise<string> {
+    if (this.detectedCurrency) return this.detectedCurrency;
+    try {
+      const resp = await this._request('GET', 'exchange/v1/derivatives/futures/wallets');
+      const wallets = Array.isArray(resp) ? resp : (resp.data || []);
+      // Prefer USDT, fallback to INR, then anything
+      const best = wallets.find((w: any) => w.currency_short_name === 'USDT')
+        || wallets.find((w: any) => w.currency_short_name === 'INR')
+        || wallets[0];
+      if (best) {
+        this.detectedCurrency = best.currency_short_name;
+        console.log(`[CoinDCXRouter] Detected account currency: ${this.detectedCurrency}`);
+        return this.detectedCurrency!;
+      }
+    } catch (err) {
+      console.warn('[CoinDCXRouter] Currency detection failed, defaulting to USDT');
+    }
+    return 'USDT';
   }
 
   private _nowMs(): number {
@@ -38,7 +59,8 @@ export class CoinDCXRouter implements OrderRouter {
 
   private async _request(method: string, endpoint: string, payload: any = {}): Promise<any> {
     const bodyObj = { ...payload, timestamp: this._nowMs() };
-    const body = JSON.stringify(bodyObj);
+    // Match Python's separators=(',', ':') to ensure identical signature
+    const body = JSON.stringify(bodyObj).replace(/ /g, '');
     const url = new URL(`${COINDCX_BASE}/${endpoint.replace(/^\//, '')}`);
 
     const options = {
@@ -49,7 +71,7 @@ export class CoinDCXRouter implements OrderRouter {
         ...this._signedHeaders(body),
         'Content-Length': Buffer.byteLength(body),
       },
-      timeout: 10000, // 10s timeout
+      timeout: 10000,
     };
 
     if (process.env.DEBUG_COINDCX === '1') {
@@ -68,6 +90,9 @@ export class CoinDCXRouter implements OrderRouter {
               console.warn(`[CoinDCXRouter] ${method} ${endpoint} status=${res.statusCode} body=${data}`);
               reject(new Error(`CoinDCX Error: ${msg} (code: ${res.statusCode})`));
             } else {
+              if (process.env.DEBUG_COINDCX === '1') {
+                console.log(`[CoinDCXRouter] ${method} ${endpoint} status=${res.statusCode} response=${data.slice(0, 500)}`);
+              }
               resolve(json);
             }
           } catch (e) {
@@ -156,28 +181,35 @@ export class CoinDCXRouter implements OrderRouter {
   }
 
   async getPositions(): Promise<Position[]> {
+    const cur = await this._getCurrency();
     const resp = await this._request('POST', 'exchange/v1/derivatives/futures/positions', {
       page: '1',
       size: '100',
-      margin_currency_short_name: ['USDT'],
+      margin_currency_short_name: [cur],
     });
     
     const rawPositions = Array.isArray(resp) ? resp : (resp.data || []);
-    return rawPositions.map((raw: any) => ({
-      symbol: this._coindcxToInternal(raw.pair || raw.symbol),
-      netQty: parseFloat(raw.active_pos || raw.quantity || '0'),
-      averagePrice: parseFloat(raw.avg_price || raw.entry_price || '0'),
-      realizedPnl: parseFloat(raw.realized_pnl || '0'),
-      unrealizedPnl: parseFloat(raw.unrealized_pnl || '0'),
-    }));
+    return rawPositions
+      .map((raw: any) => {
+        const qty = parseFloat(raw.active_pos || raw.quantity || '0');
+        return {
+          symbol: this._coindcxToInternal(raw.pair || raw.symbol),
+          netQty: qty,
+          averagePrice: parseFloat(raw.avg_price || raw.entry_price || '0'),
+          realizedPnl: parseFloat(raw.realized_pnl || '0'),
+          unrealizedPnl: parseFloat(raw.unrealized_pnl || '0'),
+        };
+      })
+      .filter((p: Position) => Math.abs(p.netQty) > 0.000001);
   }
 
   async getOrders(): Promise<any[]> {
+    const cur = await this._getCurrency();
     const resp = await this._request('POST', 'exchange/v1/derivatives/futures/orders', {
       status: 'open',
       page: '1',
       size: '100',
-      margin_currency_short_name: ['USDT'],
+      margin_currency_short_name: [cur],
     });
     const rawOrders = Array.isArray(resp) ? resp : (resp.data || []);
     return rawOrders.map((raw: any) => ({
@@ -193,30 +225,36 @@ export class CoinDCXRouter implements OrderRouter {
     }));
   }
 
-  async getBalance(currency: string = 'USDT'): Promise<number> {
+  async getBalance(currency?: string): Promise<number> {
     try {
-      const resp = await this._request('POST', 'exchange/v1/derivatives/futures/wallets');
+      const target = currency || await this._getCurrency();
+      const resp = await this._request('GET', 'exchange/v1/derivatives/futures/wallets');
       const wallets = Array.isArray(resp) ? resp : (resp.data || []);
-      const wallet = wallets.find((w: any) => w.currency_short_name === currency || w.currency === currency);
+      const wallet = wallets.find((w: any) => w.currency_short_name === target || w.currency === target);
       return wallet ? parseFloat(wallet.balance || '0') : 0;
     } catch (err) {
       console.error('[CoinDCXRouter] Failed to fetch balance:', err instanceof Error ? err.message : String(err));
-      return 0;
+      throw err;
     }
   }
 
   async getTotalEquity(): Promise<number> {
     try {
-      const resp = await this._request('POST', 'exchange/v1/derivatives/futures/positions/cross_margin_details');
-      return parseFloat(resp.total_equity || resp.equity || '0');
+      const cur = await this._getCurrency();
+      const resp = await this._request('GET', 'exchange/v1/derivatives/futures/positions/cross_margin_details', {
+        margin_currency_short_name: [cur]
+      });
+      if (resp.total_equity || resp.equity) {
+        return parseFloat(resp.total_equity || resp.equity || '0');
+      }
+      throw new Error('No equity in cross_margin_details');
     } catch (err) {
-      // Fallback to balance + unrealized PnL if cross_margin_details fails
-      const balance = await this.getBalance();
+      // Fallback to balance + unrealized PnL if cross_margin_details fails or is empty
+      const balance = await this.getBalance().catch(() => 0);
       const positions = await this.getPositions().catch(() => []);
       const unrealized = positions.reduce((s, p) => s + p.unrealizedPnl, 0);
       const total = balance + unrealized;
-      if (total > 0) return total;
-      throw err; // Rethrow if we still have 0, to let the desk fallback to derived
+      return total;
     }
   }
 }
