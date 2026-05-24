@@ -14,8 +14,8 @@ export class CoinDCXRouter implements OrderRouter {
   private readonly apiSecret: string;
 
   constructor(config: CoinDCXConfig) {
-    this.apiKey = config.apiKey;
-    this.apiSecret = config.apiSecret;
+    this.apiKey = config.apiKey.trim();
+    this.apiSecret = config.apiSecret.trim();
   }
 
   private _nowMs(): number {
@@ -32,6 +32,7 @@ export class CoinDCXRouter implements OrderRouter {
       'X-AUTH-SIGNATURE': this._sign(body),
       'Content-Type': 'application/json',
       'Accept': 'application/json',
+      'User-Agent': 'crypto-trader/4.0',
     };
   }
 
@@ -44,9 +45,16 @@ export class CoinDCXRouter implements OrderRouter {
       method,
       hostname: url.hostname,
       path: url.pathname,
-      headers: this._signedHeaders(body),
+      headers: {
+        ...this._signedHeaders(body),
+        'Content-Length': Buffer.byteLength(body),
+      },
       timeout: 10000, // 10s timeout
     };
+
+    if (process.env.DEBUG_COINDCX === '1') {
+      console.log(`[CoinDCXRouter] ${method} ${endpoint} | Body: ${body}`);
+    }
 
     return new Promise((resolve, reject) => {
       const req = https.request(options, (res) => {
@@ -56,13 +64,16 @@ export class CoinDCXRouter implements OrderRouter {
           try {
             const json = JSON.parse(data);
             if (res.statusCode && res.statusCode >= 400) {
-              reject(new Error(`CoinDCX Error: ${json.message || data} (code: ${res.statusCode})`));
+              const msg = typeof json === 'object' ? (json.message || JSON.stringify(json)) : data;
+              console.warn(`[CoinDCXRouter] ${method} ${endpoint} status=${res.statusCode} body=${data}`);
+              reject(new Error(`CoinDCX Error: ${msg} (code: ${res.statusCode})`));
             } else {
               resolve(json);
             }
           } catch (e) {
             if (res.statusCode && res.statusCode >= 400) {
-              reject(new Error(`CoinDCX Error: ${data} (code: ${res.statusCode})`));
+              console.warn(`[CoinDCXRouter] ${method} ${endpoint} status=${res.statusCode} rawBody=${data.slice(0, 200)}`);
+              reject(new Error(`CoinDCX Error (Non-JSON): ${data.slice(0, 500)} (code: ${res.statusCode})`));
             } else {
               reject(new Error(`CoinDCX JSON Parse Error: ${e instanceof Error ? e.message : String(e)} | Data: ${data.slice(0, 100)}`));
             }
@@ -145,72 +156,67 @@ export class CoinDCXRouter implements OrderRouter {
   }
 
   async getPositions(): Promise<Position[]> {
-    try {
-      const resp = await this._request('POST', 'exchange/v1/derivatives/futures/positions', {
-        page: '1',
-        size: '100',
-      });
-      
-      const rawPositions = Array.isArray(resp) ? resp : (resp.data || []);
-      return rawPositions.map((raw: any) => ({
-        symbol: this._coindcxToInternal(raw.pair || raw.symbol),
-        netQty: parseFloat(raw.active_pos || raw.quantity || '0'),
-        averagePrice: parseFloat(raw.avg_price || raw.entry_price || '0'),
-        realizedPnl: parseFloat(raw.realized_pnl || '0'),
-        unrealizedPnl: parseFloat(raw.unrealized_pnl || '0'),
-      }));
-    } catch (err) {
-      console.error('[CoinDCXRouter] Failed to fetch positions:', err);
-      return [];
-    }
+    const resp = await this._request('POST', 'exchange/v1/derivatives/futures/positions', {
+      page: '1',
+      size: '100',
+      margin_currency_short_name: ['USDT'],
+    });
+    
+    const rawPositions = Array.isArray(resp) ? resp : (resp.data || []);
+    return rawPositions.map((raw: any) => ({
+      symbol: this._coindcxToInternal(raw.pair || raw.symbol),
+      netQty: parseFloat(raw.active_pos || raw.quantity || '0'),
+      averagePrice: parseFloat(raw.avg_price || raw.entry_price || '0'),
+      realizedPnl: parseFloat(raw.realized_pnl || '0'),
+      unrealizedPnl: parseFloat(raw.unrealized_pnl || '0'),
+    }));
   }
 
   async getOrders(): Promise<any[]> {
-    try {
-      const resp = await this._request('POST', 'exchange/v1/derivatives/futures/orders', {
-        status: 'open',
-        page: '1',
-        size: '100',
-      });
-      const rawOrders = Array.isArray(resp) ? resp : (resp.data || []);
-      return rawOrders.map((raw: any) => ({
-        orderId: raw.id || raw.order_id || '',
-        symbol: this._coindcxToInternal(raw.pair || raw.symbol),
-        side: (raw.side || 'buy').toUpperCase() as 'BUY' | 'SELL',
-        qty: parseFloat(raw.quantity || '0'),
-        type: raw.order_type || 'LIMIT',
-        fillPrice: parseFloat(raw.avg_price || '0'),
-        status: raw.status || 'OPEN',
-        realizedDelta: 0,
-        ts: raw.timestamp || Date.now(),
-      }));
-    } catch {
-      return [];
-    }
+    const resp = await this._request('POST', 'exchange/v1/derivatives/futures/orders', {
+      status: 'open',
+      page: '1',
+      size: '100',
+      margin_currency_short_name: ['USDT'],
+    });
+    const rawOrders = Array.isArray(resp) ? resp : (resp.data || []);
+    return rawOrders.map((raw: any) => ({
+      orderId: raw.id || raw.order_id || '',
+      symbol: this._coindcxToInternal(raw.pair || raw.symbol),
+      side: (raw.side || 'buy').toUpperCase() as 'BUY' | 'SELL',
+      qty: parseFloat(raw.quantity || '0'),
+      type: raw.order_type || 'LIMIT',
+      fillPrice: parseFloat(raw.avg_price || '0'),
+      status: raw.status || 'OPEN',
+      realizedDelta: 0,
+      ts: raw.timestamp || Date.now(),
+    }));
   }
 
   async getBalance(currency: string = 'USDT'): Promise<number> {
     try {
-      const resp = await this._request('GET', 'exchange/v1/derivatives/futures/wallets');
+      const resp = await this._request('POST', 'exchange/v1/derivatives/futures/wallets');
       const wallets = Array.isArray(resp) ? resp : (resp.data || []);
       const wallet = wallets.find((w: any) => w.currency_short_name === currency || w.currency === currency);
       return wallet ? parseFloat(wallet.balance || '0') : 0;
     } catch (err) {
-      console.error('[CoinDCXRouter] Failed to fetch balance:', err);
+      console.error('[CoinDCXRouter] Failed to fetch balance:', err instanceof Error ? err.message : String(err));
       return 0;
     }
   }
 
   async getTotalEquity(): Promise<number> {
     try {
-      const resp = await this._request('GET', 'exchange/v1/derivatives/futures/positions/cross_margin_details');
+      const resp = await this._request('POST', 'exchange/v1/derivatives/futures/positions/cross_margin_details');
       return parseFloat(resp.total_equity || resp.equity || '0');
-    } catch {
+    } catch (err) {
       // Fallback to balance + unrealized PnL if cross_margin_details fails
       const balance = await this.getBalance();
-      const positions = await this.getPositions();
+      const positions = await this.getPositions().catch(() => []);
       const unrealized = positions.reduce((s, p) => s + p.unrealizedPnl, 0);
-      return balance + unrealized;
+      const total = balance + unrealized;
+      if (total > 0) return total;
+      throw err; // Rethrow if we still have 0, to let the desk fallback to derived
     }
   }
 }

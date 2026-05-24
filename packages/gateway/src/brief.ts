@@ -311,49 +311,68 @@ function heuristicBrief(state: CachedSymbolState | null, symbol: string, interva
 // ── HTTP Handler ──────────────────────────────────────────────────────────────
 
 export async function handleBriefRequest(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
-  if (req.method !== 'POST' && req.method !== 'GET') {
-    res.writeHead(405).end('Method Not Allowed');
-    return;
-  }
+  try {
+    if (req.method !== 'POST' && req.method !== 'GET') {
+      res.writeHead(405).end('Method Not Allowed');
+      return;
+    }
 
-  const provider = url.searchParams.get('provider') ?? '';
-  const symbol = (url.searchParams.get('symbol') ?? '').toUpperCase();
-  const interval = url.searchParams.get('interval') ?? '1m';
+    const provider = url.searchParams.get('provider') ?? '';
+    const symbol = (url.searchParams.get('symbol') ?? '').toUpperCase();
+    const interval = url.searchParams.get('interval') ?? '1m';
 
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'no-store');
 
-  if (!symbol) {
-    res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'symbol is required' }));
-    return;
-  }
+    if (!symbol) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'symbol is required' }));
+      return;
+    }
 
-  const state = getState(provider, symbol);
-  console.log(`[Gateway] handleBriefRequest symbol=${symbol} state=${state ? 'present' : 'missing'}`);
+    const state = getState(provider, symbol);
+    console.log(`[Gateway] handleBriefRequest symbol=${symbol} state=${state ? 'present' : 'missing'}`);
 
-  let result: BriefResult;
+    let result: BriefResult;
 
-  if (ollamaAvailable() && state) {
-    const mtf = getMultiTimeframeCandles(provider, symbol);
-    const prompt = buildPrompt(state, interval, mtf);
-    const system = `You are a senior Indian equity and F&O prop desk analyst. Write concise institutional-quality market analysis. Be direct, use numbers, avoid filler words. Never give explicit buy/sell recommendations — frame everything as observations and probabilities.`;
-    try {
-      console.log(`[Gateway] calling ollamaGenerate for ${symbol}`);
-      const raw = await ollamaGenerate(prompt, system);
-      console.log(`[Gateway] ollamaGenerate returned ${raw ? raw.length : 0} chars`);
-      const parsed = raw && raw.trim().length > 40
-        ? parseLLMBrief(raw.trim(), symbol, interval)
-        : heuristicBrief(state, symbol, interval);
-      result = { ...parsed, mtf };
-    } catch (err) {
-      console.error(`[Gateway] ollama failed:`, err);
+    const useOllama = ollamaAvailable();
+    console.log(`[Gateway] ollamaAvailable=${useOllama}`);
+
+    if (useOllama && state) {
+      try {
+        const mtf = getMultiTimeframeCandles(provider, symbol);
+        console.log(`[Gateway] gathered MTF for ${symbol}: ${Object.keys(mtf).join(', ')}`);
+        
+        const prompt = buildPrompt(state, interval, mtf);
+        const system = `You are a senior Indian equity and F&O prop desk analyst. Write concise institutional-quality market analysis. Be direct, use numbers, avoid filler words. Never give explicit buy/sell recommendations — frame everything as observations and probabilities.`;
+        
+        console.log(`[Gateway] calling ollamaGenerate for ${symbol}`);
+        const raw = await ollamaGenerate(prompt, system);
+        console.log(`[Gateway] ollamaGenerate returned ${raw ? raw.length : 0} chars`);
+        
+        if (raw && raw.trim().length > 40) {
+          result = { ...parseLLMBrief(raw.trim(), symbol, interval), mtf };
+        } else {
+          console.log(`[Gateway] raw LLM output too short or null, falling back to heuristic`);
+          result = { ...heuristicBrief(state, symbol, interval), mtf };
+        }
+      } catch (err) {
+        console.error(`[Gateway] ollama flow failed, falling back to heuristic:`, err);
+        result = heuristicBrief(state, symbol, interval);
+      }
+    } else {
       result = heuristicBrief(state, symbol, interval);
     }
-  } else {
-    result = heuristicBrief(state, symbol, interval);
-  }
 
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify(result));
+    if (!res.headersSent) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+    }
+  } catch (err) {
+    console.error(`[Gateway] CRITICAL handleBriefRequest failure:`, err);
+    if (!res.headersSent) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+    }
+  }
 }

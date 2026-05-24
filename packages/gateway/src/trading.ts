@@ -172,19 +172,24 @@ export class TradingDesk {
   }
 
   async snapshot(): Promise<TradingSnapshot> {
-    const positions = await this.positions();
+    const positions = await this.positions().catch(() => []);
     const realized = positions.reduce((s, p) => s + p.realizedPnl, 0);
     const unrealized = positions.reduce((s, p) => s + p.unrealizedPnl, 0);
     const totalPnl = realized + unrealized;
     
+    // Default to startEquity + PnL (derived)
     let totalEquity = this.startEquity + totalPnl;
     let available = totalEquity;
 
     if (this.mode === 'live' && this.live) {
       try {
-        totalEquity = await this.live.getTotalEquity();
-        const balance = await this.live.getBalance();
-        available = balance;
+        const liveEquity = await this.live.getTotalEquity();
+        const liveBalance = await this.live.getBalance();
+        
+        // Only use live values if they are non-zero (or we explicitly trust 0 if the call succeeded)
+        if (liveEquity > 0) totalEquity = liveEquity;
+        if (liveBalance > 0) available = liveBalance;
+        else if (liveEquity > 0) available = liveEquity; // Fallback available to equity if balance fetch failed
       } catch (err) {
         console.warn('[TradingDesk] Failed to fetch live wallet data, falling back to derived:', err);
       }
@@ -194,7 +199,7 @@ export class TradingDesk {
       (s, p) => s + Math.abs(p.netQty) * (this.ltp.get(p.symbol) ?? p.averagePrice),
       0,
     );
-    if (this.mode === 'paper') {
+    if (this.mode === 'paper' || (this.mode === 'live' && available === totalEquity && exposure > 0)) {
       available = totalEquity - exposure;
     }
 
@@ -221,22 +226,24 @@ export class TradingDesk {
     const autoEntryAllowed = blockers.length === 0;
     const haveData = this.ltp.size > 0;
 
+    const fin = (n: number, fallback = 0) => Number.isFinite(n) ? n : fallback;
+
     return {
       mode: this.mode,
       wallet: {
         paper_mode: this.mode === 'paper',
-        start_equity: this.mode === 'paper' ? this.startEquity : (totalEquity - totalPnl),
-        available: available,
-        total_equity: totalEquity,
+        start_equity: fin(this.mode === 'paper' ? this.startEquity : (totalEquity - totalPnl)),
+        available: fin(available),
+        total_equity: fin(totalEquity),
       },
       stats: {
-        win_rate: winRate,
-        total_pnl: totalPnl,
-        realized_pnl: realized,
-        unrealized_pnl: unrealized,
+        win_rate: this.wins + this.losses > 0 ? fin((this.wins / (this.wins + this.losses)) * 100, null as any) : null,
+        total_pnl: fin(totalPnl),
+        realized_pnl: fin(realized),
+        unrealized_pnl: fin(unrealized),
         wins: this.wins,
         losses: this.losses,
-        closed_trades: closed,
+        closed_trades: this.wins + this.losses,
       },
       execution_health: haveData || this.mode === 'live'
         ? { healthy: true, category: 'healthy' }
@@ -248,16 +255,16 @@ export class TradingDesk {
         entry_blocked: !autoEntryAllowed,
         kill_switch: {
           state: killBlocks ? 'halted' : 'armed',
-          total_pnl_usd: totalPnl,
-          halt_at_or_below_usd: -this.killSwitchLossUsd,
+          total_pnl_usd: fin(totalPnl),
+          halt_at_or_below_usd: fin(-this.killSwitchLossUsd),
           blocks: killBlocks,
         },
         risk_gates: {
-          daily_loss_cap: { realized_pnl: realized, loss_cap_usd: lossCapUsd, blocks: lossCapBlocks },
+          daily_loss_cap: { realized_pnl: fin(realized), loss_cap_usd: fin(lossCapUsd), blocks: lossCapBlocks },
           margin_utilization: {
-            exposure_usd: exposure,
-            utilization_pct: utilizationPct,
-            max_utilization_pct: this.maxUtilPct,
+            exposure_usd: fin(exposure),
+            utilization_pct: fin(utilizationPct),
+            max_utilization_pct: fin(this.maxUtilPct),
             blocks: utilBlocks,
           },
           concurrent_positions: { current: openCount, max: this.maxConcurrent, blocks: concurrentBlocks },
@@ -267,7 +274,7 @@ export class TradingDesk {
           id: 1,
           strategy: 'manual',
           status: 'active',
-          capital_usd: this.mode === 'paper' ? this.startEquity : totalEquity,
+          capital_usd: fin(this.mode === 'paper' ? this.startEquity : totalEquity),
           started_at: this.sessionStartedAt,
         },
       },
