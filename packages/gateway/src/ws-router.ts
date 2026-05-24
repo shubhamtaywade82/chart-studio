@@ -42,6 +42,28 @@ interface OutboundFrame {
 }
 
 /**
+ * Extracts the openTime from a candle data payload. Handles both update envelopes
+ * ({ candle: { openTime }, isFinal }) and snapshot arrays (Candle[]).
+ */
+function extractCandleOpenTime(data: unknown): number | null {
+  if (!data || typeof data !== 'object') return null;
+  if (Array.isArray(data)) {
+    const last = data[data.length - 1] as Record<string, unknown> | undefined;
+    return last ? extractCandleOpenTime(last) : null;
+  }
+  const d = data as Record<string, unknown>;
+  // Update payload: { candle: { openTime }, isFinal }
+  const candle = d['candle'];
+  if (candle && typeof candle === 'object') {
+    const t = (candle as Record<string, unknown>)['openTime'];
+    return typeof t === 'number' ? t : null;
+  }
+  // Direct candle object
+  const t = d['openTime'];
+  return typeof t === 'number' ? t : null;
+}
+
+/**
  * One ClientSession per browser WS. Multiplexes (provider, symbol, channel)
  * subscriptions onto the shared Redis bridge.
  */
@@ -82,7 +104,19 @@ export class ClientSession {
     const reqId = randomUUID();
 
     let receivedAny = false;
+    // Tracks the highest candle openTime seen so far; used to discard out-of-order
+    // ticks that would cause LWC to throw "time must be greater than previous time".
+    let lastCandleTs = 0;
+
     const listener = (env: DataEnvelope): void => {
+      // Sequence validation for candle updates — prevents LWC assertion failures.
+      if (env.channel === 'candle' && env.kind === 'update') {
+        const ts = extractCandleOpenTime(env.data);
+        if (ts !== null) {
+          if (ts < lastCandleTs) return; // stale tick from a reordered or duplicate message
+          lastCandleTs = ts;
+        }
+      }
       receivedAny = true;
       this.send({
         id: msg.id,
@@ -110,6 +144,27 @@ export class ClientSession {
       key,
       reqId,
     });
+
+    // Hydrate from gateway cache immediately so the client gets last-known state
+    // without waiting for the adapter to re-send a snapshot (critical on reconnects).
+    const cachedTopic = `chart.data.${msg.provider}.${msg.symbol.toUpperCase()}.${msg.channel}${key ? `.${key}` : ''}`;
+    const cached = this.bridge.getCachedEnvelope(cachedTopic);
+    if (cached) {
+      receivedAny = true;
+      this.send({
+        id: msg.id,
+        type: cached.kind,
+        provider: cached.provider,
+        symbol: cached.symbol,
+        channel: cached.channel,
+        key: cached.key,
+        data: cached.data,
+      });
+      if (cached.channel === 'candle') {
+        const ts = extractCandleOpenTime(cached.data);
+        if (ts !== null) lastCandleTs = ts;
+      }
+    }
 
     // If no snapshot or update arrives within 8s, surface an error frame to
     // the client so the UI can show a stale/offline indicator instead of

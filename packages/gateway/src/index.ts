@@ -6,6 +6,7 @@ import { ClientSession } from './ws-router';
 import { federatedListSymbols, federatedSearchSymbols } from './search';
 import { handleBriefRequest, cacheAnalytics, cacheCandle, cacheMorningBrief, getMorningBrief } from './brief';
 import { fetchMacroSnapshot } from './macro';
+import { handleUdfConfig, handleUdfTime, handleUdfHistory } from './udf';
 import { MarginCalculator, PortfolioGreeksEngine, VarEngine } from '@chart-studio/ai-engine';
 import type { DataEnvelope } from '@chart-studio/adapter-core';
 
@@ -338,6 +339,27 @@ const main = async (): Promise<void> => {
       .catch((err) => {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      });
+      return;
+    }
+
+    // ── TradingView UDF endpoints ─────────────────────────────────────────
+    if (url.pathname === '/udf/config') {
+      handleUdfConfig(req, res);
+      return;
+    }
+
+    if (url.pathname === '/udf/time') {
+      handleUdfTime(req, res);
+      return;
+    }
+
+    if (url.pathname === '/udf/history') {
+      handleUdfHistory(bridge, req, res, url).catch((err) => {
+        if (!res.headersSent) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ s: 'error', errmsg: String(err) }));
+        }
       });
       return;
     }
