@@ -10,6 +10,10 @@ export class TradingOpsPanel {
   private readonly client: TradingClient;
   private snap: TradingSnapshot | null = null;
   private focusedSymbol = '';
+  private readonly ticket = { symbol: '', qty: '', type: 'MARKET', price: '' };
+  private ticketMsg = '';
+  private ticketMsgCls = '';
+  private pendingSide: 'BUY' | 'SELL' = 'BUY';
 
   constructor(private readonly root: HTMLElement) {
     this.client = new TradingClient();
@@ -22,7 +26,24 @@ export class TradingOpsPanel {
   setSymbol(symbol: string): void {
     this.focusedSymbol = symbol;
     const input = this.root.querySelector<HTMLInputElement>('#ops-ticket-symbol');
-    if (input && document.activeElement !== input) input.value = symbol;
+    if (input && document.activeElement !== input) {
+      this.ticket.symbol = symbol;
+      input.value = symbol;
+    }
+  }
+
+  /** Read current ticket field values out of the DOM before a re-render wipes them. */
+  private captureTicket(): void {
+    const get = (id: string): string | null =>
+      this.root.querySelector<HTMLInputElement | HTMLSelectElement>(id)?.value ?? null;
+    const sym = get('#ops-ticket-symbol');
+    if (sym !== null) this.ticket.symbol = sym;
+    const qty = get('#ops-ticket-qty');
+    if (qty !== null) this.ticket.qty = qty;
+    const type = get('#ops-ticket-type');
+    if (type !== null) this.ticket.type = type;
+    const price = get('#ops-ticket-price');
+    if (price !== null) this.ticket.price = price;
   }
 
   private render(): void {
@@ -31,6 +52,12 @@ export class TradingOpsPanel {
       this.root.innerHTML = `<div class="ops-empty">Connecting to trading desk…</div>`;
       return;
     }
+    this.captureTicket();
+    // Remember focus + caret so a 2s snapshot push doesn't interrupt typing.
+    const active = document.activeElement as HTMLInputElement | null;
+    const activeId = active && this.root.contains(active) ? active.id : null;
+    const caretStart = active?.selectionStart ?? null;
+    const caretEnd = active?.selectionEnd ?? null;
 
     const os = s.operational_state;
     const rg = os.risk_gates;
@@ -75,20 +102,20 @@ export class TradingOpsPanel {
         <section class="ops-card">
           <header class="ops-card-h">ORDER_TICKET ${s.mode === 'live' ? '<span class="ops-pill neg">LIVE_DISABLED</span>' : ''}</header>
           <form id="ops-ticket" class="ops-ticket">
-            <input id="ops-ticket-symbol" placeholder="SYMBOL" value="${this.focusedSymbol}" autocomplete="off" />
+            <input id="ops-ticket-symbol" placeholder="SYMBOL" value="${this.ticket.symbol || this.focusedSymbol}" autocomplete="off" />
             <div class="ops-ticket-row">
-              <input id="ops-ticket-qty" type="number" min="0" step="any" placeholder="QTY" />
+              <input id="ops-ticket-qty" type="number" min="0" step="any" placeholder="QTY" value="${this.ticket.qty}" />
               <select id="ops-ticket-type">
-                <option value="MARKET">MARKET</option>
-                <option value="LIMIT">LIMIT</option>
+                <option value="MARKET" ${this.ticket.type === 'MARKET' ? 'selected' : ''}>MARKET</option>
+                <option value="LIMIT" ${this.ticket.type === 'LIMIT' ? 'selected' : ''}>LIMIT</option>
               </select>
-              <input id="ops-ticket-price" type="number" min="0" step="any" placeholder="PRICE (limit)" />
+              <input id="ops-ticket-price" type="number" min="0" step="any" placeholder="PRICE (limit)" value="${this.ticket.price}" />
             </div>
             <div class="ops-ticket-actions">
               <button type="submit" class="ops-buy" data-side="BUY" ${s.mode === 'live' ? 'disabled' : ''}>BUY</button>
               <button type="submit" class="ops-sell" data-side="SELL" ${s.mode === 'live' ? 'disabled' : ''}>SELL</button>
             </div>
-            <div id="ops-ticket-msg" class="ops-ticket-msg"></div>
+            <div id="ops-ticket-msg" class="ops-ticket-msg ${this.ticketMsgCls}">${this.ticketMsg}</div>
           </form>
         </section>
 
@@ -105,6 +132,16 @@ export class TradingOpsPanel {
     `;
 
     this.wire();
+
+    if (activeId) {
+      const el = this.root.querySelector<HTMLInputElement>(`#${activeId}`);
+      if (el) {
+        el.focus();
+        if (caretStart !== null && el.setSelectionRange && el.type !== 'number') {
+          try { el.setSelectionRange(caretStart, caretEnd ?? caretStart); } catch { /* unsupported */ }
+        }
+      }
+    }
   }
 
   private stat(label: string, value: string | false, cls: string): string {
@@ -167,27 +204,28 @@ export class TradingOpsPanel {
     });
 
     const form = this.root.querySelector<HTMLFormElement>('#ops-ticket');
-    const msg = this.root.querySelector<HTMLDivElement>('#ops-ticket-msg');
-    let pendingSide: 'BUY' | 'SELL' = 'BUY';
+    // Persist edits immediately so the next snapshot re-render keeps them.
+    form?.addEventListener('input', () => this.captureTicket());
     this.root.querySelectorAll<HTMLButtonElement>('.ops-buy,.ops-sell').forEach((btn) => {
-      btn.addEventListener('click', () => { pendingSide = btn.dataset.side as 'BUY' | 'SELL'; });
+      btn.addEventListener('click', () => { this.pendingSide = btn.dataset.side as 'BUY' | 'SELL'; });
     });
 
     form?.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const symbol = this.root.querySelector<HTMLInputElement>('#ops-ticket-symbol')!.value.trim().toUpperCase();
-      const qty = Number(this.root.querySelector<HTMLInputElement>('#ops-ticket-qty')!.value);
-      const type = this.root.querySelector<HTMLSelectElement>('#ops-ticket-type')!.value as 'MARKET' | 'LIMIT';
-      const price = Number(this.root.querySelector<HTMLInputElement>('#ops-ticket-price')!.value) || undefined;
+      this.captureTicket();
+      const symbol = this.ticket.symbol.trim().toUpperCase();
+      const qty = Number(this.ticket.qty);
+      const type = this.ticket.type as 'MARKET' | 'LIMIT';
+      const price = Number(this.ticket.price) || undefined;
       if (!symbol || !qty || qty <= 0) {
-        if (msg) { msg.textContent = 'Symbol and positive qty required'; msg.className = 'ops-ticket-msg neg'; }
+        this.ticketMsg = 'Symbol and positive qty required';
+        this.ticketMsgCls = 'neg';
+        this.render();
         return;
       }
-      const res = await this.client.placeOrder({ symbol, side: pendingSide, quantity: qty, type, price, product: 'INTRADAY' });
-      if (msg) {
-        msg.textContent = `${res.status}${res.message ? ' · ' + res.message : ''}`;
-        msg.className = `ops-ticket-msg ${res.status === 'EXECUTED' ? 'pos' : 'neg'}`;
-      }
+      const res = await this.client.placeOrder({ symbol, side: this.pendingSide, quantity: qty, type, price, product: 'INTRADAY' });
+      this.ticketMsg = `${res.status}${res.message ? ' · ' + res.message : ''}`;
+      this.ticketMsgCls = res.status === 'EXECUTED' ? 'pos' : 'neg';
       await this.client.refresh();
     });
   }
