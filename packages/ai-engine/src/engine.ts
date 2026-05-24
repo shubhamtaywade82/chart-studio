@@ -97,7 +97,7 @@ export class PropDeskAI {
     // Periodic correlation broadcast.
     setInterval(() => this.publishCorrelations(), 5_000);
 
-    console.log('[ai-engine] online; ollama at', process.env.OLLAMA_HOST ?? 'http://localhost:11434');
+    console.log('[ai-engine] online; ollama at', process.env.OLLAMA_BASE_URL ?? process.env.OLLAMA_HOST ?? 'http://localhost:11434');
   }
 
   async stop(): Promise<void> {

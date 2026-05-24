@@ -117,7 +117,7 @@ function getMultiTimeframeCandles(provider: string, symbol: string): Record<stri
 
 import { Ollama } from 'ollama';
 
-const OLLAMA_HOST = (process.env.OLLAMA_HOST ?? 'http://localhost:11434').replace(/\/$/, '');
+const OLLAMA_HOST = (process.env.OLLAMA_BASE_URL ?? process.env.OLLAMA_HOST ?? 'http://localhost:11434').replace(/\/$/, '');
 const OLLAMA_DISABLE = process.env.OLLAMA_DISABLE === '1';
 const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY;
 const BRIEF_MODEL = process.env.AI_NARRATIVE_MODEL ?? 'llama3.2:3b';

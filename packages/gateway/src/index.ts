@@ -205,7 +205,7 @@ const main = async (): Promise<void> => {
     }
 
     if (url.pathname === '/ai/health') {
-      const ollamaHost = (process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/$/, '');
+      const ollamaHost = (process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/$/, '');
       const apiKey = process.env.OLLAMA_API_KEY;
       
       const check = async () => {

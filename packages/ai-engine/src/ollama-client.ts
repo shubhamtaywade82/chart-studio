@@ -29,7 +29,7 @@ export class OllamaClient {
   private requestQueue: Promise<any> = Promise.resolve();
 
   constructor() {
-    const host = (process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/$/, '');
+    const host = (process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/$/, '');
     const apiKey = process.env.OLLAMA_API_KEY;
     
     this.client = new Ollama({
