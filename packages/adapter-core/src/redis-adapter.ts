@@ -18,6 +18,8 @@ interface RefCountedStream {
   refs: number;
   /** Last snapshot frame, replayed for late subscribers. */
   lastSnapshot?: unknown;
+  /** Timestamp when the snapshot was last fetched from the provider. */
+  lastFetchTs?: number;
 }
 
 export interface RedisAdapterOptions {
@@ -103,7 +105,7 @@ export class RedisAdapter {
     if (existing) {
       existing.refs += 1;
       if (existing.lastSnapshot !== undefined) {
-        // Replay snapshot for the new subscriber.
+        // Replay snapshot for the new subscriber immediately.
         this.publishData({
           provider: this.provider.id,
           symbol: msg.symbol.toUpperCase(),
@@ -113,6 +115,15 @@ export class RedisAdapter {
           ts: Date.now(),
           data: existing.lastSnapshot,
         });
+      }
+
+      // If the snapshot is older than 60s, fetch a fresh one in the background
+      // so the new subscriber gets any history they missed while disconnected,
+      // without blocking the immediate replay.
+      const now = Date.now();
+      if (!existing.lastFetchTs || now - existing.lastFetchTs > 60_000) {
+        existing.lastFetchTs = now;
+        void this.fetchAndPublishSnapshot(msg, k);
       }
       return;
     }
@@ -197,7 +208,10 @@ export class RedisAdapter {
       return;
     }
     const stream = this.streams.get(k);
-    if (stream) stream.lastSnapshot = snapshot;
+    if (stream) {
+      stream.lastSnapshot = snapshot;
+      stream.lastFetchTs = Date.now();
+    }
     this.publishData({
       provider: this.provider.id,
       symbol: msg.symbol.toUpperCase(),

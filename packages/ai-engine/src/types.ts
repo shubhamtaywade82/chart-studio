@@ -111,9 +111,9 @@ export interface TacticalAnalysis {
   setup: TradeSetup;
   /** SMC components that the AI identifies as high-priority/confluent. */
   focus_components?: {
-    order_blocks?: UTCTimestamp[];
-    fvgs?: UTCTimestamp[];
-    sweeps?: UTCTimestamp[];
+    order_blocks?: number[];
+    fvgs?: number[];
+    sweeps?: number[];
   };
   narrative: string;
   urgency: Urgency;

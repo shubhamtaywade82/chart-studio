@@ -91,13 +91,16 @@ const main = async (): Promise<void> => {
   });
 
   // Periodic macro snapshot broadcast
-  setInterval(async () => {
+  const broadcastMacro = async () => {
     const snap = await fetchMacroSnapshot();
     if (snap) {
       await bridge['pub'].publish('chart.macro.snapshot', JSON.stringify(snap));
     }
-  }, 60_000); // Every 60s
+  };
   
+  // Fire immediately on boot, then every 60s
+  void broadcastMacro();
+  setInterval(broadcastMacro, 60_000);
   const marginCalc = new MarginCalculator();
   const greeksEngine = new PortfolioGreeksEngine();
   const varEngine = new VarEngine();
