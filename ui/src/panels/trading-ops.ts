@@ -15,6 +15,7 @@ export class TradingOpsPanel {
   private ticketMsgCls = '';
   private pendingSide: 'BUY' | 'SELL' = 'BUY';
   private modeListeners: Array<(mode: TradingMode) => void> = [];
+  private updateListeners: Array<(snap: TradingSnapshot) => void> = [];
 
   constructor(private readonly root: HTMLElement) {
     this.client = new TradingClient();
@@ -25,9 +26,14 @@ export class TradingOpsPanel {
       if (oldMode && oldMode !== s.mode) {
         this.modeListeners.forEach(fn => fn(s.mode));
       }
+      this.updateListeners.forEach(fn => fn(s));
     });
     void this.client.refresh();
     this.render();
+  }
+
+  onUpdate(fn: (snap: TradingSnapshot) => void): void {
+    this.updateListeners.push(fn);
   }
 
   onModeChange(fn: (mode: TradingMode) => void): void {
@@ -222,7 +228,11 @@ export class TradingOpsPanel {
   private wire(): void {
     this.root.querySelectorAll<HTMLButtonElement>('.ops-mode-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        await this.client.setMode(btn.dataset.mode as TradingMode);
+        const next = btn.dataset.mode as TradingMode;
+        this.snap = null; // Clear old data immediately
+        this.render();
+        this.modeListeners.forEach(fn => fn(next));
+        await this.client.setMode(next);
         await this.client.refresh();
       });
     });

@@ -90,9 +90,7 @@ export class CoinDCXRouter implements OrderRouter {
               console.warn(`[CoinDCXRouter] ${method} ${endpoint} status=${res.statusCode} body=${data}`);
               reject(new Error(`CoinDCX Error: ${msg} (code: ${res.statusCode})`));
             } else {
-              if (process.env.DEBUG_COINDCX === '1') {
-                console.log(`[CoinDCXRouter] ${method} ${endpoint} status=${res.statusCode} response=${data.slice(0, 500)}`);
-              }
+              console.log(`[CoinDCXRouter] ${method} ${endpoint} status=${res.statusCode} response=${data.slice(0, 1000)}`);
               resolve(json);
             }
           } catch (e) {
@@ -199,8 +197,8 @@ export class CoinDCXRouter implements OrderRouter {
           realizedPnl: parseFloat(raw.realized_pnl || '0'),
           unrealizedPnl: parseFloat(raw.unrealized_pnl || '0'),
           liquidationPrice: parseFloat(raw.liquidation_price || '0') || undefined,
-          stopLoss: parseFloat(raw.stop_loss || raw.sl || '0') || undefined,
-          takeProfit: parseFloat(raw.take_profit || raw.tp || '0') || undefined,
+          stopLoss: parseFloat(raw.stop_loss_trigger || raw.stop_loss || raw.sl || '0') || undefined,
+          takeProfit: parseFloat(raw.take_profit_trigger || raw.take_profit || raw.tp || '0') || undefined,
         };
       })
       .filter((p: Position) => Math.abs(p.netQty) > 0.000001);

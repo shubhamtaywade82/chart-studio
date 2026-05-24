@@ -21,6 +21,7 @@ import { CANDLE_THEMES, loadCandleTheme, saveCandleTheme, type CandleTheme } fro
 import { LtpPlugin } from './chart/ltp-primitive';
 import { RealtimeLinePlugin } from './chart/plugins/realtime-line/RealtimeLinePrimitive';
 import { ActiveCandlePlugin } from './chart/plugins/active-candle/ActiveCandlePrimitive';
+import { PositionPlugin } from './chart/plugins/positions/PositionPlugin';
 import { ChartEngine } from './chart/engine/ChartEngine';
 import { vwap } from './indicators/math';
 import {
@@ -58,6 +59,7 @@ export class ChartView {
   private ltp: LtpPlugin;
   private realtimeLine: RealtimeLinePlugin;
   private activeCandle: ActiveCandlePlugin;
+  private positionPlugin: PositionPlugin;
   
   private candles: Candle[] = [];
   private theme: CandleTheme = loadCandleTheme();
@@ -132,10 +134,12 @@ export class ChartView {
     this.ltp.attachEngine(this.engine);
     this.realtimeLine = new RealtimeLinePlugin(this.engine);
     this.activeCandle = new ActiveCandlePlugin(this.engine);
+    this.positionPlugin = new PositionPlugin(this.engine);
     
     this.engine.registerPlugin(this.ltp);
     this.engine.registerPlugin(this.realtimeLine);
     this.engine.registerPlugin(this.activeCandle);
+    this.engine.registerPlugin(this.positionPlugin);
 
     const pane0 = this._api.panes()[0];
     if (pane0) {
@@ -192,7 +196,12 @@ export class ChartView {
     this.latencyMonitor.reset();
     this.volumeProfile.reset();
     this.aiOverlay.reset();
+    this.positionPlugin.setSymbol(symbol);
     this.dayOpenMs = 0;
+  }
+
+  setPositions(positions: any[]): void {
+    this.positionPlugin.setPositions(positions);
   }
 
   // ── AI overlay wiring ───────────────────────────────────────────────

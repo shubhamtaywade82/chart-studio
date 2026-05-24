@@ -91,6 +91,10 @@ const main = (): void => {
   const smartSignals = new SmartSignalsPanel();
   const morningBriefPanel = new MorningBriefPanel();
   const tradingOps = new TradingOpsPanel(document.getElementById('trading-ops-root')!);
+  tradingOps.onUpdate((snap) => {
+    console.log(`[main] trading snapshot received, positions=${snap.positions.length}`);
+    chart.setPositions(snap.positions);
+  });
 
   // Global mode toggle in header
   const hdrModeToggle = document.getElementById('hdr-mode-toggle');
@@ -105,6 +109,7 @@ const main = (): void => {
   hdrModeBtns?.forEach(btn => {
     btn.addEventListener('click', async () => {
       const mode = btn.dataset.mode as any;
+      chart.setPositions([]); // Clear old positions immediately to prevent ghosting
       await tradingOps.setMode(mode);
       syncHdrMode(mode);
     });
