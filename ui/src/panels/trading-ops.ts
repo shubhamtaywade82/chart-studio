@@ -14,12 +14,29 @@ export class TradingOpsPanel {
   private ticketMsg = '';
   private ticketMsgCls = '';
   private pendingSide: 'BUY' | 'SELL' = 'BUY';
+  private modeListeners: Array<(mode: TradingMode) => void> = [];
 
   constructor(private readonly root: HTMLElement) {
     this.client = new TradingClient();
-    this.client.onUpdate((s) => { this.snap = s; this.render(); });
+    this.client.onUpdate((s) => { 
+      const oldMode = this.snap?.mode;
+      this.snap = s; 
+      this.render(); 
+      if (oldMode && oldMode !== s.mode) {
+        this.modeListeners.forEach(fn => fn(s.mode));
+      }
+    });
     void this.client.refresh();
     this.render();
+  }
+
+  onModeChange(fn: (mode: TradingMode) => void): void {
+    this.modeListeners.push(fn);
+  }
+
+  async setMode(mode: TradingMode): Promise<void> {
+    await this.client.setMode(mode);
+    await this.client.refresh();
   }
 
   /** Called by the shell when the active chart symbol changes, to prefill the ticket. */

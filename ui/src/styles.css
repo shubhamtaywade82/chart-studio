@@ -165,6 +165,41 @@ body::before {
 
 /* Providers status pills */
 .providers { display: flex; gap: 6px; font-size: 11px; color: var(--text-secondary); }
+/* Global mode toggle in header */
+.topbar-mode-toggle {
+  display: flex;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+}
+.topbar-mode-toggle .mode-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  letter-spacing: 0.5px;
+}
+.topbar-mode-toggle .mode-btn.active.paper {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid var(--border-accent);
+}
+.topbar-mode-toggle .mode-btn.active.live {
+  background: var(--bear);
+  color: #fff;
+  border: 1px solid var(--bear-glow);
+  box-shadow: 0 0 8px var(--bear-glow);
+}
+.topbar-mode-toggle .mode-btn:hover:not(.active) {
+  color: var(--text-primary);
+}
 .providers .pill { display: flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: var(--radius-sm); background: var(--bg-input); border: 1px solid var(--border); font-family: var(--font-mono); }
 .providers .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
 .providers .dot.online { background: var(--bull); box-shadow: 0 0 6px var(--bull-glow); }

@@ -92,6 +92,29 @@ const main = (): void => {
   const morningBriefPanel = new MorningBriefPanel();
   const tradingOps = new TradingOpsPanel(document.getElementById('trading-ops-root')!);
 
+  // Global mode toggle in header
+  const hdrModeToggle = document.getElementById('hdr-mode-toggle');
+  const hdrModeBtns = hdrModeToggle?.querySelectorAll<HTMLButtonElement>('.mode-btn');
+  const syncHdrMode = (mode: string) => {
+    hdrModeBtns?.forEach(btn => {
+      const active = btn.dataset.mode === mode;
+      btn.classList.toggle('active', active);
+    });
+  };
+
+  hdrModeBtns?.forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const mode = btn.dataset.mode as any;
+      await tradingOps.setMode(mode);
+      syncHdrMode(mode);
+    });
+  });
+
+  // Listen for mode changes from the drawer to sync the header
+  tradingOps.onModeChange((mode) => {
+    syncHdrMode(mode);
+  });
+
   // Trading desk drawer toggle
   const opsDrawer = document.getElementById('ops-drawer');
   const opsOverlay = document.getElementById('ops-overlay');
