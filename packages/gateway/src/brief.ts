@@ -330,6 +330,7 @@ export async function handleBriefRequest(req: IncomingMessage, res: ServerRespon
   }
 
   const state = getState(provider, symbol);
+  console.log(`[Gateway] handleBriefRequest symbol=${symbol} state=${state ? 'present' : 'missing'}`);
 
   let result: BriefResult;
 
@@ -338,12 +339,15 @@ export async function handleBriefRequest(req: IncomingMessage, res: ServerRespon
     const prompt = buildPrompt(state, interval, mtf);
     const system = `You are a senior Indian equity and F&O prop desk analyst. Write concise institutional-quality market analysis. Be direct, use numbers, avoid filler words. Never give explicit buy/sell recommendations — frame everything as observations and probabilities.`;
     try {
+      console.log(`[Gateway] calling ollamaGenerate for ${symbol}`);
       const raw = await ollamaGenerate(prompt, system);
+      console.log(`[Gateway] ollamaGenerate returned ${raw ? raw.length : 0} chars`);
       const parsed = raw && raw.trim().length > 40
         ? parseLLMBrief(raw.trim(), symbol, interval)
         : heuristicBrief(state, symbol, interval);
       result = { ...parsed, mtf };
-    } catch {
+    } catch (err) {
+      console.error(`[Gateway] ollama failed:`, err);
       result = heuristicBrief(state, symbol, interval);
     }
   } else {

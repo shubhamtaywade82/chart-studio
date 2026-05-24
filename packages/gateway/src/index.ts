@@ -116,6 +116,7 @@ const main = async (): Promise<void> => {
     if (req.method === 'OPTIONS') { res.writeHead(204).end(); return; }
 
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+    logger.info(`[Gateway] ${req.method} ${url.pathname}`);
 
     if (url.pathname === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -351,6 +352,10 @@ const main = async (): Promise<void> => {
       desk.snapshot().then((snap) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(snap));
+      }).catch(err => {
+        logger.error(`[Gateway] /trading/account error: ${err.message}`);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(err) }));
       });
       return;
     }
@@ -358,6 +363,10 @@ const main = async (): Promise<void> => {
       desk.positions().then((p) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ positions: p }));
+      }).catch(err => {
+        logger.error(`[Gateway] /trading/positions error: ${err.message}`);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(err) }));
       });
       return;
     }
@@ -365,6 +374,10 @@ const main = async (): Promise<void> => {
       desk.orders().then((o) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ orders: o }));
+      }).catch(err => {
+        logger.error(`[Gateway] /trading/orders error: ${err.message}`);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(err) }));
       });
       return;
     }
@@ -377,6 +390,10 @@ const main = async (): Promise<void> => {
           desk.placeOrder(params).then((result) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result));
+          }).catch(err => {
+            logger.error(`[Gateway] /trading/order error: ${err.message}`);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: String(err) }));
           });
         } catch (err) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -412,10 +429,14 @@ const main = async (): Promise<void> => {
 
   // ── Trading snapshot push: periodic + on order/mode change ──────────────
   const broadcastTrading = async (): Promise<void> => {
-    const snap = await desk.snapshot();
-    const frame = JSON.stringify({ type: 'trading', data: snap });
-    for (const client of wss.clients) {
-      if (client.readyState === 1) client.send(frame);
+    try {
+      const snap = await desk.snapshot();
+      const frame = JSON.stringify({ type: 'trading', data: snap });
+      for (const client of wss.clients) {
+        if (client.readyState === 1) client.send(frame);
+      }
+    } catch (err) {
+      logger.error(`[Gateway] broadcastTrading error: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
   desk.onSnapshot(() => { void broadcastTrading(); });

@@ -1,5 +1,6 @@
 import { PaperRouter } from '@chart-studio/adapter-core';
 import type { OrderParams, OrderResult, Position } from '@chart-studio/adapter-core';
+import { CoinDCXRouter } from './coindcx-router';
 
 export type TradingMode = 'paper' | 'live';
 
@@ -62,13 +63,13 @@ const num = (v: string | undefined, fallback: number): number => {
 };
 
 /**
- * In-memory paper trading desk. Wraps the existing PaperRouter and derives the
- * account / stats / operational-gate view the UI surfaces. `live` mode is a
- * read-only stub: order routing is rejected until a real broker router is wired.
+ * Multi-mode trading desk. Wraps PaperRouter for simulation and CoinDCXRouter
+ * for live execution. LIVE mode fetches real positions and wallet data.
  */
 export class TradingDesk {
   private readonly ltp = new Map<string, number>();
   private readonly paper: PaperRouter;
+  private readonly live: CoinDCXRouter | null = null;
   private readonly trades: TradeRecord[] = [];
   private readonly startEquity: number;
   private readonly maxConcurrent: number;
@@ -89,6 +90,12 @@ export class TradingDesk {
     this.maxUtilPct = num(process.env.RISK_MAX_UTIL_PCT, 60);
     this.killSwitchLossUsd = num(process.env.KILL_SWITCH_LOSS_USD, this.startEquity * 0.1);
     this.paper = new PaperRouter((s) => this.ltp.get(s) ?? 0);
+
+    const apiKey = process.env.COINDCX_API_KEY;
+    const apiSecret = process.env.COINDCX_API_SECRET;
+    if (apiKey && apiSecret) {
+      this.live = new CoinDCXRouter({ apiKey, apiSecret });
+    }
   }
 
   setLtp(symbol: string, price: number): void {
@@ -111,7 +118,10 @@ export class TradingDesk {
 
   async placeOrder(params: OrderParams): Promise<OrderResult> {
     if (this.mode === 'live') {
-      return { orderId: '', status: 'REJECTED', message: 'LIVE mode is a read-only stub — order routing disabled' };
+      if (!this.live) {
+        return { orderId: '', status: 'REJECTED', message: 'LIVE mode requires COINDCX_API_KEY and COINDCX_API_SECRET' };
+      }
+      return this.live.placeOrder(params);
     }
     const before = await this.realizedTotal();
     const res = await this.paper.placeOrder(params);
@@ -138,33 +148,61 @@ export class TradingDesk {
   }
 
   async positions(): Promise<Position[]> {
+    if (this.mode === 'live' && this.live) {
+      return this.live.getPositions();
+    }
     return this.paper.getPositions();
   }
 
   async orders(): Promise<TradeRecord[]> {
+    if (this.mode === 'live' && this.live) {
+      try {
+        const liveOrders = await this.live.getOrders();
+        return liveOrders.slice(0, 50);
+      } catch {
+        return [];
+      }
+    }
     return this.trades.slice(0, 50);
   }
 
   private async realizedTotal(): Promise<number> {
-    const pos = await this.paper.getPositions();
+    const pos = await this.positions();
     return pos.reduce((s, p) => s + p.realizedPnl, 0);
   }
 
   async snapshot(): Promise<TradingSnapshot> {
-    const positions = await this.paper.getPositions();
+    const positions = await this.positions();
     const realized = positions.reduce((s, p) => s + p.realizedPnl, 0);
     const unrealized = positions.reduce((s, p) => s + p.unrealizedPnl, 0);
     const totalPnl = realized + unrealized;
-    const totalEquity = this.startEquity + totalPnl;
+    
+    let totalEquity = this.startEquity + totalPnl;
+    let available = totalEquity;
+
+    if (this.mode === 'live' && this.live) {
+      try {
+        totalEquity = await this.live.getTotalEquity();
+        const balance = await this.live.getBalance();
+        available = balance;
+      } catch (err) {
+        console.warn('[TradingDesk] Failed to fetch live wallet data, falling back to derived:', err);
+      }
+    }
+
     const exposure = positions.reduce(
       (s, p) => s + Math.abs(p.netQty) * (this.ltp.get(p.symbol) ?? p.averagePrice),
       0,
     );
+    if (this.mode === 'paper') {
+      available = totalEquity - exposure;
+    }
+
     const openCount = positions.filter((p) => p.netQty !== 0).length;
     const closed = this.wins + this.losses;
     const winRate = closed > 0 ? (this.wins / closed) * 100 : null;
 
-    const lossCapUsd = this.startEquity * (this.dailyLossCapPct / 100);
+    const lossCapUsd = (this.mode === 'paper' ? this.startEquity : totalEquity) * (this.dailyLossCapPct / 100);
     const utilizationPct = totalEquity > 0 ? (exposure / totalEquity) * 100 : 0;
 
     const killBlocks = totalPnl <= -this.killSwitchLossUsd;
@@ -173,10 +211,12 @@ export class TradingDesk {
     const concurrentBlocks = openCount >= this.maxConcurrent;
 
     const blockers: { code: string; message: string }[] = [];
-    if (killBlocks) blockers.push({ code: 'KILL_SWITCH', message: 'Portfolio loss breached kill-switch threshold' });
-    if (lossCapBlocks) blockers.push({ code: 'DAILY_LOSS_CAP', message: 'Daily realized loss cap reached' });
-    if (utilBlocks) blockers.push({ code: 'MARGIN_UTILIZATION', message: 'Margin utilization above limit' });
-    if (concurrentBlocks) blockers.push({ code: 'CONCURRENT_POSITIONS', message: 'Max concurrent positions reached' });
+    if (this.mode === 'paper') {
+      if (killBlocks) blockers.push({ code: 'KILL_SWITCH', message: 'Portfolio loss breached kill-switch threshold' });
+      if (lossCapBlocks) blockers.push({ code: 'DAILY_LOSS_CAP', message: 'Daily realized loss cap reached' });
+      if (utilBlocks) blockers.push({ code: 'MARGIN_UTILIZATION', message: 'Margin utilization above limit' });
+      if (concurrentBlocks) blockers.push({ code: 'CONCURRENT_POSITIONS', message: 'Max concurrent positions reached' });
+    }
 
     const autoEntryAllowed = blockers.length === 0;
     const haveData = this.ltp.size > 0;
@@ -185,8 +225,8 @@ export class TradingDesk {
       mode: this.mode,
       wallet: {
         paper_mode: this.mode === 'paper',
-        start_equity: this.startEquity,
-        available: totalEquity - exposure,
+        start_equity: this.mode === 'paper' ? this.startEquity : (totalEquity - totalPnl),
+        available: available,
         total_equity: totalEquity,
       },
       stats: {
@@ -198,7 +238,7 @@ export class TradingDesk {
         losses: this.losses,
         closed_trades: closed,
       },
-      execution_health: haveData
+      execution_health: haveData || this.mode === 'live'
         ? { healthy: true, category: 'healthy' }
         : { healthy: false, category: 'no_market_data' },
       operational_state: {
@@ -227,12 +267,12 @@ export class TradingDesk {
           id: 1,
           strategy: 'manual',
           status: 'active',
-          capital_usd: this.startEquity,
+          capital_usd: this.mode === 'paper' ? this.startEquity : totalEquity,
           started_at: this.sessionStartedAt,
         },
       },
       positions,
-      orders: this.trades.slice(0, 50),
+      orders: await this.orders(),
     };
   }
 }
