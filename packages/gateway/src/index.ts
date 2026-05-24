@@ -8,6 +8,7 @@ import { handleBriefRequest, cacheAnalytics, cacheCandle, cacheMorningBrief, get
 import { fetchMacroSnapshot } from './macro';
 import { MarginCalculator, PortfolioGreeksEngine, VarEngine } from '@chart-studio/ai-engine';
 import type { DataEnvelope } from '@chart-studio/adapter-core';
+import { TradingDesk, type TradingMode } from './trading';
 
 import pino from 'pino';
 import { startMonitoringServer } from './monitoring';
@@ -29,6 +30,8 @@ const main = async (): Promise<void> => {
   const bridge = new RedisBridge(REDIS_URL);
   await bridge.start();
 
+  const desk = new TradingDesk();
+
   // ── Passive analytics listener: feed the brief cache ────────────────────
   // The bridge already subscribes to chart.data.* so we just tap into it via
   // a wildcard listener registered directly on the underlying Redis sub.
@@ -40,6 +43,7 @@ const main = async (): Promise<void> => {
         if (env.kind !== 'update' || !env.data) return;
         const d = env.data as Record<string, unknown>;
         if (typeof d['ltp'] !== 'number') return;
+        desk.setLtp(env.symbol, d['ltp'] as number);
         cacheAnalytics(
           env.provider,
           env.symbol,
@@ -342,6 +346,62 @@ const main = async (): Promise<void> => {
       return;
     }
 
+    // ── Trading desk (paper-first; live = read-only stub) ────────────────
+    if (url.pathname === '/trading/account') {
+      desk.snapshot().then((snap) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(snap));
+      });
+      return;
+    }
+    if (url.pathname === '/trading/positions') {
+      desk.positions().then((p) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ positions: p }));
+      });
+      return;
+    }
+    if (url.pathname === '/trading/orders') {
+      desk.orders().then((o) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ orders: o }));
+      });
+      return;
+    }
+    if (url.pathname === '/trading/order' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      req.on('end', () => {
+        try {
+          const params = JSON.parse(body || '{}');
+          desk.placeOrder(params).then((result) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+          });
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        }
+      });
+      return;
+    }
+    if (url.pathname === '/trading/mode' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      req.on('end', () => {
+        try {
+          const { mode } = JSON.parse(body || '{}') as { mode: TradingMode };
+          const next = desk.setMode(mode);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ mode: next }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        }
+      });
+      return;
+    }
+
     res.writeHead(404).end('not found');
   });
 
@@ -349,6 +409,17 @@ const main = async (): Promise<void> => {
   wss.on('connection', (socket) => {
     new ClientSession(socket, bridge);
   });
+
+  // ── Trading snapshot push: periodic + on order/mode change ──────────────
+  const broadcastTrading = async (): Promise<void> => {
+    const snap = await desk.snapshot();
+    const frame = JSON.stringify({ type: 'trading', data: snap });
+    for (const client of wss.clients) {
+      if (client.readyState === 1) client.send(frame);
+    }
+  };
+  desk.onSnapshot(() => { void broadcastTrading(); });
+  setInterval(() => { void broadcastTrading(); }, 2000);
 
   server.listen(PORT, '0.0.0.0', () => {
     logger.info(`[Gateway] online: ws/http on :${PORT}`);

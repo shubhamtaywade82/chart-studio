@@ -25,6 +25,7 @@ import { CryptoDashboard } from './panels/crypto-dashboard';
 import { StraddleDashboard } from './panels/straddle-dashboard';
 import { ExpiryCountdown } from './panels/expiry-countdown';
 import { MorningBriefPanel } from './panels/morning-brief';
+import { TradingOpsPanel } from './panels/trading-ops';
 
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
@@ -89,6 +90,21 @@ const main = (): void => {
   const strategySignals = new StrategySignalsPanel(client);
   const smartSignals = new SmartSignalsPanel();
   const morningBriefPanel = new MorningBriefPanel();
+  const tradingOps = new TradingOpsPanel(document.getElementById('trading-ops-root')!);
+
+  // Trading desk drawer toggle
+  const opsDrawer = document.getElementById('ops-drawer');
+  const opsOverlay = document.getElementById('ops-overlay');
+  const openOps = (open: boolean): void => {
+    opsDrawer?.toggleAttribute('hidden', !open);
+    opsOverlay?.toggleAttribute('hidden', !open);
+    document.getElementById('trading-ops-btn')?.classList.toggle('active', open);
+  };
+  document.getElementById('trading-ops-btn')?.addEventListener('click', () => {
+    openOps(opsDrawer?.hasAttribute('hidden') ?? true);
+  });
+  document.getElementById('ops-drawer-close')?.addEventListener('click', () => openOps(false));
+  opsOverlay?.addEventListener('click', () => openOps(false));
   const optionChain = new OptionChainPanel(document.getElementById('option-chain-panel')!);
   const aiTradeCard = new AiTradeCard(document.getElementById('ai-trade-card-host')!);
   const greeksPanel = new GreeksPanel(document.getElementById('greeks-panel')!);
@@ -409,6 +425,7 @@ const main = (): void => {
     chart.setSymbol(state.symbol);
     chart.setIntervalMs(parseIntervalMs(state.interval));
     watchlist.setActive(state.provider, state.symbol);
+    tradingOps.setSymbol(state.symbol);
     drawings.setSymbol(state.provider, state.symbol);
     renderIntervals();
     aiBrief.refresh(state.provider, state.symbol, state.interval);
