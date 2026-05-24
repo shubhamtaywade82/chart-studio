@@ -21,6 +21,9 @@ export interface Position {
   averagePrice: number;
   realizedPnl: number;
   unrealizedPnl: number;
+  liquidationPrice?: number;
+  stopLoss?: number;
+  takeProfit?: number;
 }
 
 export interface OrderRouter {

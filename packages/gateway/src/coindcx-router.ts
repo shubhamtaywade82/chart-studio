@@ -198,6 +198,9 @@ export class CoinDCXRouter implements OrderRouter {
           averagePrice: parseFloat(raw.avg_price || raw.entry_price || '0'),
           realizedPnl: parseFloat(raw.realized_pnl || '0'),
           unrealizedPnl: parseFloat(raw.unrealized_pnl || '0'),
+          liquidationPrice: parseFloat(raw.liquidation_price || '0') || undefined,
+          stopLoss: parseFloat(raw.stop_loss || raw.sl || '0') || undefined,
+          takeProfit: parseFloat(raw.take_profit || raw.tp || '0') || undefined,
         };
       })
       .filter((p: Position) => Math.abs(p.netQty) > 0.000001);

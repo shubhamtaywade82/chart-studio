@@ -162,7 +162,7 @@ export class TradingOpsPanel {
     if (!s.positions.length) return `<div class="ops-empty-row">No open positions</div>`;
     return `
       <table class="ops-table">
-        <thead><tr><th>SYMBOL</th><th>QTY</th><th>AVG</th><th>uPnL</th></tr></thead>
+        <thead><tr><th>SYMBOL</th><th>QTY</th><th>AVG</th><th>uPnL</th><th>LIQ</th><th>SL</th><th>TP</th></tr></thead>
         <tbody>
           ${s.positions.map((p) => `
             <tr>
@@ -170,6 +170,9 @@ export class TradingOpsPanel {
               <td class="${p.netQty >= 0 ? 'pos' : 'neg'}">${fmt(p.netQty, 4)}</td>
               <td>${fmt(p.averagePrice)}</td>
               <td class="${pnlClass(p.unrealizedPnl)}">${signed(p.unrealizedPnl)}</td>
+              <td class="neg">${p.liquidationPrice ? fmt(p.liquidationPrice) : '—'}</td>
+              <td class="dim">${p.stopLoss ? fmt(p.stopLoss) : '—'}</td>
+              <td class="dim">${p.takeProfit ? fmt(p.takeProfit) : '—'}</td>
             </tr>`).join('')}
         </tbody>
       </table>`;
