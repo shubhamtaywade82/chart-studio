@@ -39,9 +39,8 @@ export class ChartEngine {
     // Core Series
     this.series = this.api.addSeries(CandlestickSeries, {
       ...this.theme.options,
-      priceLineVisible: true,
-      priceLineStyle: LineStyle.Dashed,
-      lastValueVisible: true,
+      priceLineVisible: false,
+      lastValueVisible: false,
     });
     this.volume = this.api.addSeries(HistogramSeries, {
       color: 'rgba(255, 255, 255, 0.18)',
@@ -92,17 +91,25 @@ export class ChartEngine {
   }
 
   private onAnimationFrame(timeMs: number): void {
-    if (this.candles.length === 0) return;
+    if (this.candles.length > 0) {
+      // Evaluate LTP physics
+      this.motion.update(timeMs);
+    }
 
-    // Evaluate physics
-    const animatedPrice = this.motion.update(timeMs);
+    // Auto-suspend the loop if the LTP motion is completely at rest
+    let ltpAtRest = true;
+    if (this.candles.length > 0) {
+      ltpAtRest = this.motion.getCurrent() === this.motion.getTarget();
+    }
 
-    // Auto-suspend the loop if motion is completely at rest
-    if (this.motion.getCurrent() === this.motion.getTarget()) {
+    if (ltpAtRest) {
       this.scheduler.suspendContinuousRender();
     }
 
-    // Give plugins the updated frame
+    // Always give plugins their animation frame, even when there are no candles.
+    // (BidAskPlugin needs frames to animate the Bid/Ask lines independently of candle data.)
+    // Running this AFTER the suspend continuous render check allows plugins to call
+    // requestContinuousRender() to keep the animation loop running if they are not yet at rest.
     this.plugins.updatePlugins(timeMs);
   }
 

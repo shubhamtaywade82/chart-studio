@@ -600,6 +600,15 @@ export class ChartView {
       this.ltp.setLtp(price, color, t);
       if (this.intervalMs > 0) this.ltp.setBarTiming(this.intervalMs, last.openTime);
     }
+
+    // Record trade for CandleScope pulse ring
+    if (qty !== undefined && qty > 0) {
+      const priceY = this.series.priceToCoordinate(price);
+      if (priceY !== null) {
+        const isBuy = last ? price >= last.close : true;
+        this.activeCandle.recordTrade(priceY, qty, isBuy);
+      }
+    }
   }
 
   clearLastTradePrice(): void {
@@ -613,8 +622,10 @@ export class ChartView {
     this.bidAskPlugin.setPrices(null, null);
   }
 
-  setBookTicker(bestBidPrice: number, bestAskPrice: number): void {
+  setBookTicker(bestBidPrice: number, bestAskPrice: number, bestBidQty = 0, bestAskQty = 0): void {
     this.bidAskPlugin.setPrices(bestBidPrice, bestAskPrice);
+    // Forward top-of-book to CandleScope for the spread bracket
+    this.activeCandle.setBookTicker(bestBidPrice, bestBidQty, bestAskPrice, bestAskQty);
   }
 
   // ── Indicators ──────────────────────────────────────────────────────
@@ -670,6 +681,12 @@ export class ChartView {
 
     this.analytics.update(state);
     this.depthHeatmap.update(data.depthBids, data.depthAsks);
+
+    // Feed live depth + order flow into the CandleScope overlay
+    if (data.depthBids && data.depthAsks) {
+      this.activeCandle.setDepth(data.depthBids, data.depthAsks);
+    }
+    this.activeCandle.setOrderFlow(data.totalBuyQty, data.totalSellQty);
     this.updateVolumeProfile(data.ltp, data.ltq);
 
     if (data.ltt > 0) this.latencyMonitor.recordTick(data.ltt);

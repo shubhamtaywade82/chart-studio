@@ -583,7 +583,7 @@ const main = (): void => {
 
     unsubs.push(client.streamBookTicker(state.provider, state.symbol, (bt) => {
       updateHeaderTicker(bt.bestBidPrice, bt.bestAskPrice);
-      chart.setBookTicker(bt.bestBidPrice, bt.bestAskPrice);
+      chart.setBookTicker(bt.bestBidPrice, bt.bestAskPrice, bt.bestBidQty, bt.bestAskQty);
     }));
     unsubs.push(client.streamAnalytics(state.provider, state.symbol, (data) => {
       chart.updateAnalytics(data);
