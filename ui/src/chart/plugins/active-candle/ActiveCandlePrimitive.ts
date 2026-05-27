@@ -47,6 +47,12 @@ export class ActiveCandlePlugin implements ChartPlugin, ISeriesPrimitive {
     this.series = series;
   }
 
+  setEnabled(enabled: boolean): void {
+    this.overlay.enabled = enabled;
+    this.engine?.scheduler.requestContinuousRender();
+    this.requestUpdate?.();
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // Data feed setters (called from chart.ts)
   // ──────────────────────────────────────────────────────────────────────────
@@ -77,13 +83,15 @@ export class ActiveCandlePlugin implements ChartPlugin, ISeriesPrimitive {
   }
 
   /**
-   * Record a live trade for the pulse ring animation.
+   * Record a live trade for the pulse ring and footprint.
+   * @param price   Raw trade price
    * @param priceY  Y coordinate in **media (logical) pixels** at the trade price
    * @param qty     Trade quantity
    * @param isBuy   true = buyer-initiated trade
    */
-  recordTrade(priceY: number, qty: number, isBuy: boolean): void {
+  recordTrade(price: number, priceY: number, qty: number, isBuy: boolean): void {
     // Store in renderer so the canvas pass can consume it synchronously
+    this.renderer.lastTradePrice = price;
     this.renderer.lastTradeY     = priceY;
     this.renderer.lastTradeQty   = qty;
     this.renderer.lastTradeIsBuy = isBuy;
@@ -126,19 +134,66 @@ export class ActiveCandlePlugin implements ChartPlugin, ISeriesPrimitive {
     const askY = askPrice > 0 ? (this.series.priceToCoordinate(askPrice) ?? null) : null;
     const bidY = bidPrice > 0 ? (this.series.priceToCoordinate(bidPrice) ?? null) : null;
 
-    const isBullish   = animatedPrice >= last.open;
-    const themeColor  = isBullish
-      ? (this.engine.theme.options.upColor   || '#2ebd85')
-      : (this.engine.theme.options.downColor || '#f6465d');
-    const borderColor = isBullish
-      ? (this.engine.theme.options.borderUpColor   || themeColor)
-      : (this.engine.theme.options.borderDownColor || themeColor);
+    // Resolve bidsY / asksY coordinates for actual price depth aura
+    const bidLevels = this.overlay['bids'] as DepthLevel[];
+    const askLevels = this.overlay['asks'] as DepthLevel[];
+    const bidsY = bidLevels.map(b => b.price > 0 ? (this.series!.priceToCoordinate(b.price) ?? null) : null);
+    const asksY = askLevels.map(a => a.price > 0 ? (this.series!.priceToCoordinate(a.price) ?? null) : null);
 
-    // Keep pulse rings animating even without new trades
-    if (this.overlay.hasActivePulses()) {
-      this.engine.scheduler.requestContinuousRender();
+    // Resolve rolling average volume of past 10 candles
+    let avgVolume = 0;
+    if (candles.length > 1) {
+      const historical = candles.slice(-11, -1);
+      const sum = historical.reduce((acc, c) => acc + c.volume, 0);
+      avgVolume = sum / historical.length;
     }
 
+    const isEnabled = this.overlay.enabled;
+    const isBullish = animatedPrice >= last.open;
+    let fillStyle = '';
+    let borderColor = '';
+    let glowBlur = 0;
+
+    if (isEnabled) {
+      const volumeRatio = avgVolume > 0 ? last.volume / avgVolume : 0.5;
+
+      // Calculate depth imbalance
+      const bidQtyTotal = bidLevels.reduce((acc, b) => acc + b.qty, 0);
+      const askQtyTotal = askLevels.reduce((acc, a) => acc + a.qty, 0);
+      const totalQty = bidQtyTotal + askQtyTotal;
+      const imbalance = totalQty > 0 ? (bidQtyTotal - askQtyTotal) / totalQty : 0; // -1..+1
+
+      let baseColor = '';
+      if (isBullish) {
+        if (imbalance >= 0) {
+          baseColor = this._interpolateColor([14, 203, 129], [0, 255, 120], imbalance);
+        } else {
+          baseColor = this._interpolateColor([14, 203, 129], [220, 195, 15], -imbalance);
+        }
+      } else {
+        if (imbalance <= 0) {
+          baseColor = this._interpolateColor([246, 70, 93], [255, 10, 60], -imbalance);
+        } else {
+          baseColor = this._interpolateColor([246, 70, 93], [255, 130, 20], imbalance);
+        }
+      }
+
+      borderColor = baseColor;
+      const alpha = Math.max(0.35, Math.min(0.85, 0.45 + (volumeRatio - 0.5) * 0.25));
+      fillStyle = baseColor.replace('rgb', 'rgba').replace(')', `, ${alpha.toFixed(2)})`);
+      glowBlur = Math.round(Math.min(2.5, volumeRatio) * 6);
+    } else {
+      borderColor = isBullish
+        ? (this.engine.theme.options.upColor   || '#2ebd85')
+        : (this.engine.theme.options.downColor || '#f6465d');
+      fillStyle = borderColor;
+      glowBlur = 0;
+    }
+
+    // Keep pulse rings animating even without new trades
+    if (isEnabled && this.overlay.hasActivePulses()) {
+      this.engine.scheduler.requestContinuousRender();
+    }
 
     Object.assign(this.renderer, {
       x,
@@ -147,13 +202,28 @@ export class ActiveCandlePlugin implements ChartPlugin, ISeriesPrimitive {
       lowY,
       closeY:      y,
       candleWidth: this.engine.getCandleWidth(),
-      color:       themeColor,
+      color:       fillStyle,
       borderColor,
+      glowBlur,
       askY,
       bidY,
+      bidsY,
+      asksY,
+      highPrice:   last.high,
+      lowPrice:    last.low,
+      currentVolume: last.volume,
+      avgVolume,
+      openTime:    last.openTime,
     });
 
     this.requestUpdate?.();
+  }
+
+  private _interpolateColor(color1: number[], color2: number[], t: number): string {
+    const r = Math.round(color1[0] + (color2[0] - color1[0]) * t);
+    const g = Math.round(color1[1] + (color2[1] - color1[1]) * t);
+    const b = Math.round(color1[2] + (color2[2] - color1[2]) * t);
+    return `rgb(${r},${g},${b})`;
   }
 
   paneViews(): IPrimitivePaneView[] {

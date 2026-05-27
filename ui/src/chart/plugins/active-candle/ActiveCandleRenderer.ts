@@ -16,18 +16,30 @@ export class ActiveCandleRenderer {
 
   color       = '#00ff88'
   borderColor = '#00ff88'
+  glowBlur    = 14
 
   /** Y coordinate (media px) of best ask price — passed in from primitive */
   askY: number | null = null
   /** Y coordinate (media px) of best bid price — passed in from primitive */
   bidY: number | null = null
 
+  /** Raw price of the last trade — used for footprint binning */
+  lastTradePrice: number | null = null
   /** Y coordinate (media px) of the last trade — used for pulse ring */
   lastTradeY: number | null = null
   lastTradeQty = 0
   lastTradeIsBuy = false
   /** Set to true once, then cleared after the overlay consumes it */
   pendingTrade = false
+
+  // ── Depth levels (Y coords) and Candle Info — passed in from primitive ────
+  bidsY:         (number | null)[] = []
+  asksY:         (number | null)[] = []
+  highPrice:     number = 0
+  lowPrice:      number = 0
+  currentVolume: number = 0
+  avgVolume:     number = 0
+  openTime:      number = 0
 
   overlay: CandleScopeOverlay | null = null
 
@@ -41,7 +53,7 @@ export class ActiveCandleRenderer {
         // ── Base candle (wick + body) ───────────────────────────────────────
         ctx.strokeStyle = this.borderColor
         ctx.fillStyle   = this.color
-        ctx.shadowBlur  = 14
+        ctx.shadowBlur  = this.glowBlur
         ctx.shadowColor = this.borderColor
 
         // wick
@@ -72,9 +84,9 @@ export class ActiveCandleRenderer {
 
         // ── CandleScope overlay (renders above base candle) ─────────────────
         if (this.overlay) {
-          // Consume pending trade event → create pulse ring
-          if (this.pendingTrade && this.lastTradeY !== null) {
-            this.overlay.onTrade(this.lastTradeY, this.lastTradeQty, this.lastTradeIsBuy)
+          // Consume pending trade event → create pulse ring & footprint trade
+          if (this.pendingTrade && this.lastTradeY !== null && this.lastTradePrice !== null) {
+            this.overlay.onTrade(this.lastTradePrice, this.lastTradeY, this.lastTradeQty, this.lastTradeIsBuy)
             this.pendingTrade = false
           }
 
@@ -97,6 +109,13 @@ export class ActiveCandleRenderer {
             1,         // dpr = 1 in media coordinate space
             this.askY,
             this.bidY,
+            this.bidsY,
+            this.asksY,
+            this.highPrice,
+            this.lowPrice,
+            this.currentVolume,
+            this.avgVolume,
+            this.openTime,
           )
         }
       }

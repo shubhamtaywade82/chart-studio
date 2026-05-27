@@ -384,6 +384,8 @@ const main = (): void => {
       { key: 'showDayLow', label: 'Day Low (DL)' },
       { key: 'showPrevClose', label: 'Previous Close' },
       { key: 'showAtp', label: 'Average Traded Price (ATP)' },
+      { key: 'showCandleScope', label: 'Active Candle Microstructure (CandleScope)' },
+      { key: 'showRealtimeLine', label: 'Real-time Price Connector (Prev Close to LTP)' },
     ];
     
     // Load saved states
@@ -398,6 +400,11 @@ const main = (): void => {
     if (analytics) {
       Object.assign(analytics.options, savedAnalytics);
     }
+    const showCandleScope = savedAnalytics['showCandleScope'] !== false; // true by default
+    chart.setCandleScopeEnabled(showCandleScope);
+
+    const showRealtimeLine = savedAnalytics['showRealtimeLine'] !== false; // true by default
+    chart.setRealtimeLineEnabled(showRealtimeLine);
 
     indicatorHost.innerHTML = toggles.map(t => {
       const isChecked = savedAnalytics[t.key] !== false; // true by default
@@ -411,9 +418,15 @@ const main = (): void => {
     toggles.forEach(t => {
       document.getElementById(`toggle-${t.key}`)?.addEventListener('change', (e) => {
         const checked = (e.target as HTMLInputElement).checked;
-        if (analytics) {
-          (analytics.options as any)[t.key] = checked;
-          analytics.forceRedraw();
+        if (t.key === 'showCandleScope') {
+          chart.setCandleScopeEnabled(checked);
+        } else if (t.key === 'showRealtimeLine') {
+          chart.setRealtimeLineEnabled(checked);
+        } else {
+          if (analytics) {
+            (analytics.options as any)[t.key] = checked;
+            analytics.forceRedraw();
+          }
         }
         savedAnalytics[t.key] = checked;
         localStorage.setItem('ui-analytics-toggles', JSON.stringify(savedAnalytics));

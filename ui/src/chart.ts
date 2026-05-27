@@ -601,12 +601,12 @@ export class ChartView {
       if (this.intervalMs > 0) this.ltp.setBarTiming(this.intervalMs, last.openTime);
     }
 
-    // Record trade for CandleScope pulse ring
+    // Record trade for CandleScope pulse ring and footprint
     if (qty !== undefined && qty > 0) {
       const priceY = this.series.priceToCoordinate(price);
       if (priceY !== null) {
         const isBuy = last ? price >= last.close : true;
-        this.activeCandle.recordTrade(priceY, qty, isBuy);
+        this.activeCandle.recordTrade(price, priceY, qty, isBuy);
       }
     }
   }
@@ -626,6 +626,14 @@ export class ChartView {
     this.bidAskPlugin.setPrices(bestBidPrice, bestAskPrice);
     // Forward top-of-book to CandleScope for the spread bracket
     this.activeCandle.setBookTicker(bestBidPrice, bestBidQty, bestAskPrice, bestAskQty);
+  }
+
+  setCandleScopeEnabled(enabled: boolean): void {
+    this.activeCandle.setEnabled(enabled);
+  }
+
+  setRealtimeLineEnabled(enabled: boolean): void {
+    this.realtimeLine.setEnabled(enabled);
   }
 
   // ── Indicators ──────────────────────────────────────────────────────

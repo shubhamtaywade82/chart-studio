@@ -18,6 +18,8 @@ export class RealtimeLinePlugin implements ChartPlugin, ISeriesPrimitive {
   private series?: ISeriesApi<'Candlestick'>;
   private engine?: ChartEngine;
 
+  public enabled = true;
+
   constructor(engine: ChartEngine) {
     this.engine = engine;
   }
@@ -28,6 +30,12 @@ export class RealtimeLinePlugin implements ChartPlugin, ISeriesPrimitive {
 
   attached({ requestUpdate }: { requestUpdate: () => void }) {
     this.requestUpdate = requestUpdate;
+  }
+
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    this.engine?.scheduler.requestContinuousRender();
+    this.requestUpdate?.();
   }
 
   updateAllViews(): void {
@@ -43,6 +51,7 @@ export class RealtimeLinePlugin implements ChartPlugin, ISeriesPrimitive {
   }
 
   onAnimationFrame(timeMs: number): void {
+    if (!this.enabled) return;
     if (!this.api || !this.series || !this.engine) return;
 
     const candles = this.engine.getCandles();
@@ -90,6 +99,7 @@ export class RealtimeLinePlugin implements ChartPlugin, ISeriesPrimitive {
   }
 
   paneViews(): IPrimitivePaneView[] {
+    if (!this.enabled) return [];
     return [
       { renderer: () => this.renderer },
     ];
