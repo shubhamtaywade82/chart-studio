@@ -24,6 +24,7 @@ import { ActiveCandlePlugin } from './chart/plugins/active-candle/ActiveCandlePr
 import { PositionPlugin } from './chart/plugins/positions/PositionPlugin';
 import { PriceAlertsPlugin } from './chart/plugins/alerts/PriceAlertsPlugin';
 import { ChartEngine } from './chart/engine/ChartEngine';
+import { BidAskPlugin } from './chart/bid-ask-primitive';
 import { vwap } from './indicators/math';
 import {
   SMA, EMA, RSI, BollingerBands, MACD, ATR, ADX, Stochastic, CCI, OBV, MFI, Supertrend, IchimokuCloud
@@ -85,8 +86,7 @@ export class ChartView {
   private aiOverlay: AIOverlayManager;
   private alertListeners = new Set<(alerts: any[]) => void>();
   private lastUpdatedTime: UTCTimestamp | null = null;
-  private askLine: IPriceLine | null = null;
-  private bidLine: IPriceLine | null = null;
+  private bidAskPlugin: BidAskPlugin;
 
   constructor(container: HTMLElement) {
     this.engine = new ChartEngine(container, {
@@ -138,12 +138,15 @@ export class ChartView {
     this.activeCandle = new ActiveCandlePlugin(this.engine);
     this.positionPlugin = new PositionPlugin(this.engine);
     this.alertsPlugin = new PriceAlertsPlugin();
+    this.bidAskPlugin = new BidAskPlugin();
+    this.bidAskPlugin.attachEngine(this.engine);
     
     this.engine.registerPlugin(this.ltp);
     this.engine.registerPlugin(this.realtimeLine);
     this.engine.registerPlugin(this.activeCandle);
     this.engine.registerPlugin(this.positionPlugin);
     this.series.attachPrimitive(this.alertsPlugin);
+    this.engine.registerPlugin(this.bidAskPlugin);
 
     const pane0 = this._api.panes()[0];
     if (pane0) {
@@ -602,49 +605,16 @@ export class ChartView {
   clearLastTradePrice(): void {
     this.candles = [];
     this.engine.setCandles(this.candles);
+    this.series.setData([]);
+    this.volume.setData([]);
     this.engine.motion.reset();
     this.lastUpdatedTime = null;
     this.ltp.setLtp(null, '#2ebd85', null);
-    if (this.askLine) { try { this.series.removePriceLine(this.askLine); } catch {} this.askLine = null; }
-    if (this.bidLine) { try { this.series.removePriceLine(this.bidLine); } catch {} this.bidLine = null; }
+    this.bidAskPlugin.setPrices(null, null);
   }
 
   setBookTicker(bestBidPrice: number, bestAskPrice: number): void {
-    const precision = this.precision;
-    const fmt = (p: number) => p.toLocaleString(undefined, {
-      minimumFractionDigits: precision,
-      maximumFractionDigits: precision,
-    });
-
-    if (this.askLine) {
-      this.series.removePriceLine(this.askLine);
-      this.askLine = null;
-    }
-    if (this.bidLine) {
-      this.series.removePriceLine(this.bidLine);
-      this.bidLine = null;
-    }
-
-    if (bestAskPrice > 0) {
-      this.askLine = this.series.createPriceLine({
-        price: bestAskPrice,
-        color: '#f6465d',
-        lineWidth: 1,
-        lineStyle: LineStyle.Dotted,
-        axisLabelVisible: true,
-        title: `Ask ${fmt(bestAskPrice)}`,
-      });
-    }
-    if (bestBidPrice > 0) {
-      this.bidLine = this.series.createPriceLine({
-        price: bestBidPrice,
-        color: '#2ebd85',
-        lineWidth: 1,
-        lineStyle: LineStyle.Dotted,
-        axisLabelVisible: true,
-        title: `Bid ${fmt(bestBidPrice)}`,
-      });
-    }
+    this.bidAskPlugin.setPrices(bestBidPrice, bestAskPrice);
   }
 
   // ── Indicators ──────────────────────────────────────────────────────

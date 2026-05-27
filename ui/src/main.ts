@@ -693,6 +693,22 @@ const main = (): void => {
     setInterval(tryBootstrap, 1500);
   }
 
+  // Refresh tab state if returning after being hidden/inactive for more than 30 seconds
+  let lastHiddenTime = 0;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      lastHiddenTime = Date.now();
+    } else {
+      if (lastHiddenTime > 0 && Date.now() - lastHiddenTime > 30_000) {
+        console.log('[main] Tab became visible after a long time, refreshing active state.');
+        if (activeState) {
+          applyState(activeState);
+        }
+      }
+      lastHiddenTime = 0;
+    }
+  });
+
   renderIntervals();
 };
 
