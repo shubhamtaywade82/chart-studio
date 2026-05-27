@@ -207,7 +207,7 @@ class BidAskPaneView implements IPrimitivePaneView {
 
           ctx.save();
 
-          const drawLine = (price: number, color: string, label: string) => {
+          const drawLine = (price: number, color: string, label: string, position: 'top' | 'bottom') => {
             const y = series.priceToCoordinate(price);
             if (y === null || y === undefined) return;
             const bY = Math.round(y * dpr);
@@ -230,12 +230,27 @@ class BidAskPaneView implements IPrimitivePaneView {
             const fontSize = Math.round(10 * dpr);
             ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
             ctx.fillStyle = color;
-            ctx.textBaseline = 'bottom';
-            ctx.fillText(label, Math.round(8 * dpr), bY - Math.round(2 * dpr));
+            if (position === 'top') {
+              ctx.textBaseline = 'bottom';
+              ctx.fillText(label, Math.round(8 * dpr), bY - Math.round(2 * dpr));
+            } else {
+              ctx.textBaseline = 'top';
+              ctx.fillText(label, Math.round(8 * dpr), bY + Math.round(2 * dpr));
+            }
           };
 
-          if (askDraw !== null) drawLine(askDraw, '#f6465d', 'Ask');
-          if (bidDraw !== null) drawLine(bidDraw, '#0ecb81', 'Bid');
+          if (askDraw !== null && bidDraw !== null) {
+            if (askDraw >= bidDraw) {
+              drawLine(askDraw, '#f6465d', 'Ask', 'top');
+              drawLine(bidDraw, '#0ecb81', 'Bid', 'bottom');
+            } else {
+              drawLine(bidDraw, '#0ecb81', 'Bid', 'top');
+              drawLine(askDraw, '#f6465d', 'Ask', 'bottom');
+            }
+          } else {
+            if (askDraw !== null) drawLine(askDraw, '#f6465d', 'Ask', 'top');
+            if (bidDraw !== null) drawLine(bidDraw, '#0ecb81', 'Bid', 'bottom');
+          }
 
           ctx.restore();
         });
