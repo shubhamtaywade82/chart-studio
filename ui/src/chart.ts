@@ -125,6 +125,7 @@ export class ChartView {
         borderVisible: false,
         scaleMargins: { top: 0.1, bottom: 0.2 },
         alignLabels: true,
+        minimumWidth: 80,
       },
     });
 

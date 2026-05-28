@@ -51,6 +51,7 @@ export class ChartEngine {
 
     this.api.priceScale('volume').applyOptions({
       scaleMargins: { top: 0.8, bottom: 0 },
+      visible: false,
     });
 
     this.plugins = new PluginRuntime(this.api, this.series);
