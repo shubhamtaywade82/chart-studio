@@ -468,6 +468,7 @@ const main = (): void => {
 
   // Header ticker (BID/ASK/SPREAD/price)
   let lastPrice: number | null = null;
+  let referencePrice: number | null = null;
   const fmt = (n: number): string => {
     const p = chart.getPrecision() ?? 2;
     return n.toLocaleString(undefined, { minimumFractionDigits: p, maximumFractionDigits: p });
@@ -479,8 +480,18 @@ const main = (): void => {
       const hdrPrice = document.getElementById('hdr-price');
       const hdrChange = document.getElementById('hdr-change');
       if (hdrPrice) hdrPrice.textContent = fmt(price);
-      if (hdrChange && lastPrice !== null && lastPrice > 0) {
-        const pct = ((price - lastPrice) / lastPrice) * 100;
+
+      // Lazily resolve fallback referencePrice from history if not loaded yet
+      if (referencePrice === null || referencePrice <= 0) {
+        if (currentCandles && currentCandles.length >= 2) {
+          referencePrice = currentCandles[currentCandles.length - 2]?.close || currentCandles[0]?.open || null;
+        } else if (currentCandles && currentCandles.length > 0) {
+          referencePrice = currentCandles[0]?.open || null;
+        }
+      }
+
+      if (hdrChange && referencePrice !== null && referencePrice > 0) {
+        const pct = ((price - referencePrice) / referencePrice) * 100;
         hdrChange.classList.remove('bull', 'bear', 'neutral');
         hdrChange.classList.add(pct > 0 ? 'bull' : pct < 0 ? 'bear' : 'neutral');
         hdrChange.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%`;
@@ -531,6 +542,7 @@ const main = (): void => {
     currentCandles = [];
     chart.clearLastTradePrice();
     lastPrice = null;
+    referencePrice = null;
     scriptManager.setCandles([]);
 
     chart.setLoadOlderCallback(async (oldestOpenTime: number) => {
@@ -556,13 +568,22 @@ const main = (): void => {
         chart.setHistory(history);
         applyIndicators(indicatorPicker.current());
         scriptManager.setCandles(history);
+        if (referencePrice === null && history.length > 0) {
+          referencePrice = history[history.length - 2]?.close || history[0]?.open || null;
+        }
       },
       (upd) => {
         chart.updateCandle(upd.candle);
         updateHeaderPrice(upd.candle.close);
         const last = currentCandles[currentCandles.length - 1];
-        if (last && last.openTime === upd.candle.openTime) currentCandles[currentCandles.length - 1] = upd.candle;
-        else currentCandles.push(upd.candle);
+        if (last && last.openTime === upd.candle.openTime) {
+          currentCandles[currentCandles.length - 1] = upd.candle;
+        } else {
+          currentCandles.push(upd.candle);
+          if (currentCandles.length >= 2) {
+            referencePrice = currentCandles[currentCandles.length - 2]?.close || null;
+          }
+        }
         if (upd.isFinal) scriptManager.updateCandle(upd.candle, currentCandles);
       },
     ));
@@ -601,6 +622,11 @@ const main = (): void => {
     unsubs.push(client.streamAnalytics(state.provider, state.symbol, (data) => {
       chart.updateAnalytics(data);
       chart.renderVolumeProfile();
+      if (data.prevClose && data.prevClose > 0) {
+        referencePrice = data.prevClose;
+      } else if (data.dayOpen && data.dayOpen > 0) {
+        referencePrice = data.dayOpen;
+      }
       // Analytics stream often carries the latest LTP as well; use as fallback.
       updateHeaderPrice(data.ltp);
       if (data.optionChain) {
