@@ -386,6 +386,7 @@ const main = (): void => {
       { key: 'showAtp', label: 'Average Traded Price (ATP)' },
       { key: 'showCandleScope', label: 'Active Candle Microstructure (CandleScope)' },
       { key: 'showRealtimeLine', label: 'Real-time Price Connector (Prev Close to LTP)' },
+      { key: 'showFootprint', label: 'Order Flow Footprint Overlay (Zoom In close to view)' },
     ];
     
     // Load saved states
@@ -406,6 +407,9 @@ const main = (): void => {
     const showRealtimeLine = savedAnalytics['showRealtimeLine'] !== false; // true by default
     chart.setRealtimeLineEnabled(showRealtimeLine);
 
+    const showFootprint = savedAnalytics['showFootprint'] !== false; // true by default
+    chart.setFootprintEnabled(showFootprint);
+
     indicatorHost.innerHTML = toggles.map(t => {
       const isChecked = savedAnalytics[t.key] !== false; // true by default
       return `
@@ -422,6 +426,8 @@ const main = (): void => {
           chart.setCandleScopeEnabled(checked);
         } else if (t.key === 'showRealtimeLine') {
           chart.setRealtimeLineEnabled(checked);
+        } else if (t.key === 'showFootprint') {
+          chart.setFootprintEnabled(checked);
         } else {
           if (analytics) {
             (analytics.options as any)[t.key] = checked;
@@ -607,6 +613,7 @@ const main = (): void => {
       tape.push(t);
       sentiment.push(t);
       microstructure.pushTrade(t);
+      chart.pushTrade(t);
       chart.setLastTradePrice(t.price, t.ts, t.qty);
       chart.updateVolumeProfile(t.price, t.qty);
       chart.renderVolumeProfile();

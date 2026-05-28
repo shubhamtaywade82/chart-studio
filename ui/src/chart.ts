@@ -25,6 +25,7 @@ import { PositionPlugin } from './chart/plugins/positions/PositionPlugin';
 import { PriceAlertsPlugin } from './chart/plugins/alerts/PriceAlertsPlugin';
 import { ChartEngine } from './chart/engine/ChartEngine';
 import { BidAskPlugin } from './chart/bid-ask-primitive';
+import { FootprintPlugin } from './chart/footprint-plugin';
 import { vwap } from './indicators/math';
 import {
   SMA, EMA, RSI, BollingerBands, MACD, ATR, ADX, Stochastic, CCI, OBV, MFI, Supertrend, IchimokuCloud
@@ -87,6 +88,7 @@ export class ChartView {
   private alertListeners = new Set<(alerts: any[]) => void>();
   private lastUpdatedTime: UTCTimestamp | null = null;
   private bidAskPlugin: BidAskPlugin;
+  private footprintPlugin: FootprintPlugin;
 
   constructor(container: HTMLElement) {
     this.engine = new ChartEngine(container, {
@@ -141,6 +143,7 @@ export class ChartView {
     this.alertsPlugin = new PriceAlertsPlugin();
     this.bidAskPlugin = new BidAskPlugin();
     this.bidAskPlugin.attachEngine(this.engine);
+    this.footprintPlugin = new FootprintPlugin();
     
     this.engine.registerPlugin(this.ltp);
     this.engine.registerPlugin(this.realtimeLine);
@@ -148,6 +151,7 @@ export class ChartView {
     this.engine.registerPlugin(this.positionPlugin);
     this.series.attachPrimitive(this.alertsPlugin);
     this.engine.registerPlugin(this.bidAskPlugin);
+    this.series.attachPrimitive(this.footprintPlugin);
 
     const pane0 = this._api.panes()[0];
     if (pane0) {
@@ -508,6 +512,7 @@ export class ChartView {
     for (const smc of this.smcPrimitives) {
       smc.setCandles(this.candles);
     }
+    this.footprintPlugin.setCandles(this.candles, this.intervalMs);
   }
 
   private refreshChartData(): void {
@@ -525,6 +530,12 @@ export class ChartView {
     this.volume.setData(vs);
     const last = cs[cs.length - 1];
     if (last) this.lastUpdatedTime = last.time;
+    this.footprintPlugin.setPrecision(this.getPrecision());
+    this.footprintPlugin.setCandles(this.candles, this.intervalMs);
+  }
+
+  public pushTrade(t: any): void {
+    this.footprintPlugin.pushTrade(t);
   }
 
   setLastTradePrice(price: number, timestampMs?: number, qty?: number): void {
@@ -650,6 +661,10 @@ export class ChartView {
 
   setRealtimeLineEnabled(enabled: boolean): void {
     this.realtimeLine.setEnabled(enabled);
+  }
+
+  setFootprintEnabled(enabled: boolean): void {
+    this.footprintPlugin.setEnabled(enabled);
   }
 
   // ── Indicators ──────────────────────────────────────────────────────
