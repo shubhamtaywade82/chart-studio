@@ -104,8 +104,51 @@ body::before {
 .topbar-center{ display: flex; align-items: center; gap: 22px; flex: 1; justify-content: center; }
 .topbar-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
-.logo { display: flex; align-items: center; gap: 8px; }
-.logo-text { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; background: linear-gradient(135deg, #7c4dff, #00b0ff); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.logo svg {
+  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), filter 0.3s ease;
+}
+.logo:hover svg {
+  transform: scale(1.1) rotate(-2deg);
+  filter: drop-shadow(0 0 8px rgba(124, 77, 255, 0.5));
+}
+.logo-text {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  line-height: 1;
+  transition: transform 0.2s ease;
+}
+.logo:hover .logo-text {
+  transform: translateX(1px);
+}
+.logo-brand {
+  font-family: var(--font-ui);
+  font-weight: 800;
+  font-size: 14px;
+  color: #ffffff;
+  letter-spacing: -0.2px;
+  text-shadow: 0 0 12px rgba(255, 255, 255, 0.15);
+}
+.logo-suffix {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 1.8px;
+  background: linear-gradient(135deg, #a88bff, #00b0ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  opacity: 0.95;
+  position: relative;
+  top: -0.5px;
+}
 
 /* Pair badge (also: opens global search) */
 .pair-badge {

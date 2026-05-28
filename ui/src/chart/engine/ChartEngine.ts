@@ -25,6 +25,7 @@ export class ChartEngine {
   public readonly plugins: PluginRuntime;
   public readonly scheduler = new RafScheduler();
   public readonly motion = new MotionEngine(0.08);
+  public readonly volumeMotion = new MotionEngine(0.08);
 
   public theme: CandleTheme = loadCandleTheme();
 
@@ -92,14 +93,32 @@ export class ChartEngine {
 
   private onAnimationFrame(timeMs: number): void {
     if (this.candles.length > 0) {
-      // Evaluate LTP physics
+      // Evaluate LTP & Volume physics
       this.motion.update(timeMs);
+      this.volumeMotion.update(timeMs);
+
+      const targetVolume = this.volumeMotion.getTarget();
+      const currentVolume = this.volumeMotion.getCurrent();
+      const last = this.candles[this.candles.length - 1];
+
+      // Native update of the volume bar with the smoothly interpolated value
+      if (currentVolume !== null && targetVolume !== null && currentVolume !== targetVolume && last) {
+        const t = Math.floor(last.openTime / 1000) as UTCTimestamp;
+        this.volume.update({
+          time: t,
+          value: currentVolume,
+          color: last.close >= last.open 
+            ? (this.theme.volumeUp ?? 'rgba(46, 189, 133, 0.35)') 
+            : (this.theme.volumeDown ?? 'rgba(246, 70, 93, 0.35)')
+        });
+      }
     }
 
-    // Auto-suspend the loop if the LTP motion is completely at rest
+    // Auto-suspend the loop if both LTP and Volume motion are completely at rest
     let ltpAtRest = true;
     if (this.candles.length > 0) {
-      ltpAtRest = this.motion.getCurrent() === this.motion.getTarget();
+      ltpAtRest = this.motion.getCurrent() === this.motion.getTarget() &&
+                  this.volumeMotion.getCurrent() === this.volumeMotion.getTarget();
     }
 
     if (ltpAtRest) {

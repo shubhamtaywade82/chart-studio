@@ -531,7 +531,7 @@ export class DhanStreamPool {
       const groups = new Map<number, DhanSubscription[]>();
       for (const ins of instruments) {
         const rc = ins.exchangeSegment.toUpperCase() === 'IDX_I'
-          ? (this.mode === REQ_TICKER ? REQ_TICKER : REQ_QUOTE)
+          ? REQ_TICKER
           : this.mode;
         let list = groups.get(rc);
         if (!list) {

@@ -41,7 +41,8 @@ export class MotionEngine {
 
     const diff = this.target - this.current;
 
-    if (Math.abs(diff) < 0.001) {
+    // Use a very small epsilon so we don't snap prematurely on micro-tick assets like SHIB or XRP
+    if (Math.abs(diff) < 1e-8) {
       this.current = this.target;
     } else {
       this.current += diff * this.smoothingFactor;

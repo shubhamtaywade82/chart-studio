@@ -360,7 +360,7 @@ export class DhanProvider implements MarketDataProvider {
         lastLtp = tick.ltp;
         if (tick.volume !== undefined) lastVol = tick.volume;
 
-        if (qty > 0) {
+        if (qty > 0 || ins.exchangeSegment === 'IDX_I') {
           onTrade({
             price: tick.ltp,
             qty: qty,

@@ -311,13 +311,24 @@ export class ChartView {
 
   // ── Data ────────────────────────────────────────────────────────────
 
+  private getDecimalPrecision(n: number): number {
+    if (!Number.isFinite(n) || n === 0) return 2;
+    const str = n.toString();
+    if (str.includes('e-')) {
+      const parts = str.split('e-');
+      const baseDecimals = parts[0].includes('.') ? parts[0].split('.')[1].length : 0;
+      return parseInt(parts[1], 10) + baseDecimals;
+    }
+    if (str.includes('.')) {
+      return str.split('.')[1].length;
+    }
+    return 2;
+  }
+
   private autoDetectPrecision(prices: number[]): void {
     let p = this.precision;
     for (const val of prices) {
-      const s = val.toString();
-      if (s.includes('.')) {
-        p = Math.max(p, s.split('.')[1]?.length ?? 0);
-      }
+      p = Math.max(p, this.getDecimalPrecision(val));
     }
 
     if (p > this.precision) {
@@ -360,10 +371,7 @@ export class ChartView {
     // Auto-detect precision based on first few candles
     let precision = 2;
     if (this.candles.length > 0) {
-      const sample = this.candles[0]!.close.toString();
-      if (sample.includes('.')) {
-        precision = Math.min(20, Math.max(2, sample.split('.')[1]!.length));
-      }
+      precision = Math.max(2, Math.min(15, this.getDecimalPrecision(this.candles[0]!.close)));
     }
     const tickSize = 1 / Math.pow(10, precision);
 
@@ -469,9 +477,11 @@ export class ChartView {
             : { color: undefined, wickColor: undefined, borderColor: undefined };
           
           this.series.update({ time: t, open: c.open, high: c.high, low: c.low, close: c.close, ...colorOpts });
+          
+          const volValue = isLatestInState ? (this.engine.volumeMotion.getCurrent() ?? c.volume) : c.volume;
           this.volume.update({
             time: t,
-            value: c.volume,
+            value: volValue,
             color: c.close >= c.open ? (this.theme.volumeUp ?? 'rgba(46, 189, 133, 0.35)') : (this.theme.volumeDown ?? 'rgba(246, 70, 93, 0.35)'),
           });
           
@@ -490,6 +500,7 @@ export class ChartView {
     const currentLast = this.candles[this.candles.length - 1];
     if (currentLast && c.openTime === currentLast.openTime) {
       this.engine.motion.setTarget(c.close);
+      this.engine.volumeMotion.setTarget(c.volume);
       this.engine.scheduler.requestContinuousRender();
     }
 
@@ -539,7 +550,7 @@ export class ChartView {
           this.series.update({ time: t, open: price, high: price, low: price, close: price, color: 'rgba(0,0,0,0)', wickColor: 'rgba(0,0,0,0)', borderColor: 'rgba(0,0,0,0)' });
           this.volume.update({
             time: t,
-            value: newCandle.volume,
+            value: this.engine.volumeMotion.getCurrent() ?? newCandle.volume,
             color: 'rgba(255, 255, 255, 0.18)',
           });
           this.lastUpdatedTime = t;
@@ -549,6 +560,7 @@ export class ChartView {
       }
       this.updateCandleState(newCandle);
       this.engine.motion.setTarget(price);
+      this.engine.volumeMotion.setTarget(newCandle.volume);
       this.engine.scheduler.requestContinuousRender();
       return;
     }
@@ -578,7 +590,7 @@ export class ChartView {
           this.series.update({ time: t, open: price, high: price, low: price, close: price, color: 'rgba(0,0,0,0)', wickColor: 'rgba(0,0,0,0)', borderColor: 'rgba(0,0,0,0)' });
           this.volume.update({
             time: t,
-            value: newCandle.volume,
+            value: this.engine.volumeMotion.getCurrent() ?? newCandle.volume,
             color: 'rgba(255, 255, 255, 0.18)',
           });
           this.lastUpdatedTime = t;
@@ -591,6 +603,8 @@ export class ChartView {
 
     // drive visual smoothness via animator.
     this.engine.motion.setTarget(price);
+    const updatedLast = this.candles[this.candles.length - 1];
+    if (updatedLast) this.engine.volumeMotion.setTarget(updatedLast.volume);
     this.engine.scheduler.requestContinuousRender();
     
     // update LTP
@@ -617,6 +631,7 @@ export class ChartView {
     this.series.setData([]);
     this.volume.setData([]);
     this.engine.motion.reset();
+    this.engine.volumeMotion.reset();
     this.lastUpdatedTime = null;
     this.ltp.setLtp(null, '#2ebd85', null);
     this.bidAskPlugin.setPrices(null, null);
